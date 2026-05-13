@@ -10,11 +10,9 @@
 *.sct
 *.dep
 *.lnp
-*.uvguix.*
 
-# Keil project files
-*.uvoptx
-*.uvprojx
+
+
 
 # VS Code
 .vscode/
