@@ -446,3 +446,12 @@ void MFRC522_Halt(void) {
 	MFRC522_CalculateCRC(buff, 2, &buff[2]);
 	MFRC522_ToCard(PCD_TRANSCEIVE, buff, 4, buff, &unLen);
 }
+
+
+void MFRC522_Task(void* param)
+{
+    uint8_t CardID[8];
+    if (MFRC522_Check(CardID) == MI_OK) {
+        printf("Card: %02X%02X%02X%02X\n", CardID[0],CardID[1],CardID[2],CardID[3]);
+    }
+}

@@ -103,6 +103,9 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+  
+  /*创建读id卡任务*/
+  BaseType_t ret = xTaskCreate(MFRC522_Task,"MFRC522_Task", 3072, NULL, 1, NULL);
 
   BaseType_t ret = xTaskCreate(LCD_Show_Task,"LCD_Show_task", 3072, NULL, 1, NULL);
   if(ret != pdPASS)

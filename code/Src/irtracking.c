@@ -12,7 +12,8 @@ void irtacking_Read(uint8_t *s1,uint8_t *s2,uint8_t *s3,uint8_t *s4,uint8_t *s5,
     // 通过I2C2读取巡线模块传感器状态寄存器（1字节）
     // 每个bit对应一个传感器：0表示黑线，1表示白底
     I2C2_Read_Len(IR_READ_ADDR, &irtacking_data, 1);
-
+	
+	
     // 将8位数据逐位提取到对应的传感器变量中
     // s1对应最高位(bit7)，s8对应最低位(bit0)
     *s1 = (irtacking_data >> 7) & 0x01;
