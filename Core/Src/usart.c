@@ -159,4 +159,56 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
 /* USER CODE BEGIN 1 */
 
+#include <string.h>
+
+#define UART_RX_BUF_SIZE 128
+
+uint8_t uart_rx_data = 0;
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART2)
+  {
+    HAL_UART_Transmit(&huart2, &uart_rx_data, 1, HAL_MAX_DELAY);
+    
+    HAL_UART_Receive_IT(&huart2, &uart_rx_data, 1);
+  }
+}
+
+void UART_Test_Init(void)
+{
+  HAL_UART_Receive_IT(&huart2, &uart_rx_data, 1);
+}
+
+void UART_Send_String(const char *str)
+{
+  uint16_t len = strlen(str);
+  HAL_UART_Transmit(&huart2, (uint8_t *)str, len, HAL_MAX_DELAY);
+}
+
+void UART_Send_UID(uint8_t* uid, uint8_t len)
+{
+  char hex_str[40];
+  char hex_chars[] = "0123456789ABCDEF";
+  uint8_t i, pos = 0;
+  
+  pos += sprintf(&hex_str[pos], "Card ID: ");
+  
+  for (i = 0; i < len; i++)
+  {
+    if (i > 0)
+    {
+      hex_str[pos++] = ' ';
+    }
+    hex_str[pos++] = hex_chars[(uid[i] >> 4) & 0x0F];
+    hex_str[pos++] = hex_chars[uid[i] & 0x0F];
+  }
+  
+  hex_str[pos++] = '\r';
+  hex_str[pos++] = '\n';
+  hex_str[pos] = '\0';
+  
+  HAL_UART_Transmit(&huart2, (uint8_t *)hex_str, pos, HAL_MAX_DELAY);
+}
+
 /* USER CODE END 1 */

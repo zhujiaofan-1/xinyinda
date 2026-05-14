@@ -20,6 +20,25 @@
 extern SPI_HandleTypeDef hspi1;
 
 /**
+ * @brief  RC522引脚初始化
+ * @param  无
+ * @retval 无
+ */
+void MFRC522_Pin_Init(void) {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  
+  GPIO_InitStruct.Pin = GPIO_PIN_4;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
+}
+
+/**
  * @brief  SPI发送1字节数据
  * @param  data: 要发送的数据
  * @retval 接收到的数据
@@ -81,9 +100,9 @@ void MFRC522_WriteRegister(uint8_t addr, uint8_t val) {
 uint8_t MFRC522_ReadRegister(uint8_t addr) {
 	uint8_t val;
 
-	addr = ((addr << 1) & 0x7E) | 0x80;
+	addr = (addr << 1) | 0x80;
 	val = SPI1_ReadReg(addr);
-	return val;	
+	return val;
 }
 
 /**
@@ -95,6 +114,63 @@ uint8_t MFRC522_Check(uint8_t* id) {
 	uint8_t status;
 	status = MFRC522_Request(PICC_REQIDL, id);
 	if (status == MI_OK) status = MFRC522_Anticoll(id);
+	MFRC522_Halt();
+	return status;
+}
+
+/**
+ * @brief  检查UID是否为伪卡（无效UID）
+ * @param  uid: 卡片UID
+ * @retval 1: 是伪卡, 0: 有效卡片
+ */
+uint8_t MFRC522_IsFakeUID(uint8_t* uid) {
+	if (uid[0] == 0xA1 && uid[1] == 0x00 && uid[2] == 0x00 && uid[3] == 0x00) return 1;
+	if (uid[0] == 0x00 && uid[1] == 0x00 && uid[2] == 0x00 && uid[3] == 0x00) return 1;
+	if (uid[0] == 0xFF && uid[1] == 0xFF && uid[2] == 0xFF && uid[3] == 0xFF) return 1;
+	if (uid[0] == 0xAA && uid[1] == 0xAA && uid[2] == 0xAA && uid[3] == 0xAA) return 1;
+	return 0;
+}
+
+/**
+ * @brief  读取ID卡完整信息
+ * @param  uid: 卡片UID缓冲区（至少5字节）
+ * @param  blockData: 块数据缓冲区（可选，读取成功后存储第1块数据，16字节）
+ * @param  key: 扇区密码（可选，6字节，默认使用FFFFFFFFFFFF）
+ * @retval MI_OK: 读取成功, MI_ERR: 读取失败, MI_NOTAGERR: 未检测到卡片
+ */
+uint8_t MFRC522_ReadIDCard(uint8_t* uid, uint8_t* blockData, uint8_t* key) {
+	uint8_t status;
+	uint8_t defaultKey[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+	
+	if (key == NULL) {
+		key = defaultKey;
+	}
+	
+	MFRC522_SetBitMask(MFRC522_REG_FIFO_LEVEL, 0x80);
+	
+	status = MFRC522_Request(PICC_REQIDL, uid);
+	if (status != MI_OK) {
+		return status;
+	}
+	
+	status = MFRC522_Anticoll(uid);
+	if (status != MI_OK) {
+		MFRC522_Halt();
+		return status;
+	}
+	
+	if (MFRC522_IsFakeUID(uid)) {
+		MFRC522_Halt();
+		return MI_ERR;
+	}
+	
+	if (blockData != NULL) {
+		status = MFRC522_Auth(PICC_AUTHENT1A, 1, key, uid);
+		if (status == MI_OK) {
+			status = MFRC522_Read(1, blockData);
+		}
+	}
+	
 	MFRC522_Halt();
 	return status;
 }
@@ -447,11 +523,3 @@ void MFRC522_Halt(void) {
 	MFRC522_ToCard(PCD_TRANSCEIVE, buff, 4, buff, &unLen);
 }
 
-
-void MFRC522_Task(void* param)
-{
-    uint8_t CardID[8];
-    if (MFRC522_Check(CardID) == MI_OK) {
-        printf("Card: %02X%02X%02X%02X\n", CardID[0],CardID[1],CardID[2],CardID[3]);
-    }
-}

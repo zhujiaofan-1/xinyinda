@@ -7,7 +7,7 @@
 #define HCSR04_GPIO_PORT GPIOF
 
 
-
+void HCSR04_Init(void);
 
 float HCSR04_Get_Distance(void);
 

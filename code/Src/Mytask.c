@@ -183,3 +183,49 @@ void irtracking_Task(void* param)
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
+
+void MFRC522_Task(void *pvParameters)
+{
+  uint8_t uid[5];
+  uint8_t last_uid[5] = {0};
+  uint8_t status;
+  uint8_t i;
+  uint8_t same_card;
+  
+  for(;;)
+  {
+    status = MFRC522_ReadIDCard(uid, NULL, NULL);
+    
+    if (status == MI_OK)
+    {
+      same_card = 1;
+      for (i = 0; i < 4; i++)
+      {
+        if (uid[i] != last_uid[i])
+        {
+          same_card = 0;
+          break;
+        }
+      }
+      
+      if (!same_card)
+      {
+        for (i = 0; i < 4; i++)
+        {
+          last_uid[i] = uid[i];
+        }
+        
+        UART_Send_UID(uid, 4);
+      }
+    }
+    else if (status == MI_NOTAGERR)
+    {
+      for (i = 0; i < 4; i++)
+      {
+        last_uid[i] = 0;
+      }
+    }
+    
+    vTaskDelay(100);
+  }
+}

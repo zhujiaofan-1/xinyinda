@@ -30,6 +30,7 @@
 /* USER CODE BEGIN Includes */
 
 #include "rc522.h"
+#include "usart.h"
 
 /* USER CODE END Includes */
 
@@ -104,7 +105,18 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  MFRC522_Pin_Init();
   MFRC522_Init();
+  
+  UART_Test_Init();
+  UART_Send_String("UART Test Ready!\r\n");
+  
+  {
+    uint8_t version = MFRC522_ReadRegister(0x37);
+    char msg[50];
+    sprintf(msg, "RC522 Version: 0x%02X\r\n", version);
+    UART_Send_String(msg);
+  }
 
   /* USER CODE END 2 */
 
@@ -121,9 +133,14 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    /* USER CODE END 3 */
   }
   /* USER CODE END 3 */
 }

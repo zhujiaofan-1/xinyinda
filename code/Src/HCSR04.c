@@ -59,3 +59,8 @@ float HCSR04_Get_Distance(void)
 
     return distance;
 }
+
+void HCSR04_Init(void)
+{
+	
+}

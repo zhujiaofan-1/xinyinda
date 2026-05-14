@@ -1,12 +1,12 @@
 #include "stdint.h"
 // Mifare RC522 RFID Card reader 13.56 MHz
-// STM32F103 RFID RC522 SPI3 / UART / USB / Keil HAL
+// STM32F4xx RFID RC522 SPI1 / UART / USB / Keil HAL
 
-// MFRC522		STM32F103		DESCRIPTION
-// CS (SDA)		PA4					SPI3_NSS	Chip select for SPI
-// SCK				PB3					SPI3_SCK	Serial Clock for SPI
-// MOSI			PB5					SPI3_MOSI	Master In Slave Out for SPI
-// MISO			PB4					SPI3_MISO	Master Out Slave In for SPI
+// MFRC522		STM32F4xx		DESCRIPTION
+// CS (SDA)		PA4					SPI1_NSS	Chip select for SPI
+// SCK				PA5					SPI1_SCK	Serial Clock for SPI
+// MOSI			PA7					SPI1_MOSI	Master In Slave Out for SPI
+// MISO			PA6					SPI1_MISO	Master Out Slave In for SPI
 // IRQ				-						Irq
 // GND				GND					Ground
 // RST				3.3V				Reset pin (3.3V)
@@ -119,12 +119,15 @@
 #define MFRC522_MAX_LEN								16
 
 // Function declarations
+void MFRC522_Pin_Init(void);
 uint8_t SPI1SendByte(uint8_t data);
 void SPI1_WriteReg(uint8_t address, uint8_t value);
 uint8_t SPI1_ReadReg(uint8_t address);
 void MFRC522_WriteRegister(uint8_t addr, uint8_t val);
 uint8_t MFRC522_ReadRegister(uint8_t addr);
 uint8_t MFRC522_Check(uint8_t* id);
+uint8_t MFRC522_IsFakeUID(uint8_t* uid);
+uint8_t MFRC522_ReadIDCard(uint8_t* uid, uint8_t* blockData, uint8_t* key);
 uint8_t MFRC522_Compare(uint8_t* CardID, uint8_t* CompareID);
 void MFRC522_SetBitMask(uint8_t reg, uint8_t mask);
 void MFRC522_ClearBitMask(uint8_t reg, uint8_t mask);
