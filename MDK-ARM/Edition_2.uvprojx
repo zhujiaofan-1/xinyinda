@@ -885,6 +885,16 @@
               <FileType>5</FileType>
               <FilePath>..\code\Inc\Mytask.h</FilePath>
             </File>
+            <File>
+              <FileName>navigation.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\Inc\navigation.h</FilePath>
+            </File>
+            <File>
+              <FileName>junction_writer.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\Inc\junction_writer.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -954,6 +964,16 @@
               <FileName>Mytask.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\code\Src\Mytask.c</FilePath>
+            </File>
+            <File>
+              <FileName>navigation.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\Src\navigation.c</FilePath>
+            </File>
+            <File>
+              <FileName>junction_writer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\Src\junction_writer.c</FilePath>
             </File>
           </Files>
         </Group>

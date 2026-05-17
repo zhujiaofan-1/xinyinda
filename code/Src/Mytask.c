@@ -1,7 +1,13 @@
 #include "Mytask.h"
 #include "Headfile.h"
+#include "junction_writer.h"
+#include "navigation.h"
+#include "usart.h"
 
 SemaphoreHandle_t xAvoidSemaphore = NULL;
+
+// System mode: 0 = Write mode, 1 = Navigation mode
+volatile uint8_t system_mode = 1;  // Default to navigation mode
 
 // 避障状态机
 enum {
@@ -184,48 +190,141 @@ void irtracking_Task(void* param)
     }
 }
 
-void MFRC522_Task(void *pvParameters)
-{
+// ==================== Card Write Configuration ====================
+// Select which junction data to write: 1 = Junction A, 2 = Junction B, 3 = Junction C
+#define WRITE_JUNCTION_TYPE  1
+
+// ==================== Card Write Task ====================
+// This task writes only ONE card per power cycle
+// Change WRITE_JUNCTION_TYPE above to select data type (1/2/3)
+void CardWriteTask(void *argument) {
   uint8_t uid[5];
   uint8_t last_uid[5] = {0};
   uint8_t status;
   uint8_t i;
   uint8_t same_card;
+  uint8_t card_written = 0;
+  char msg[80];
   
-  for(;;)
-  {
-    status = MFRC522_ReadIDCard(uid, NULL, NULL);
-    
-    if (status == MI_OK)
-    {
-      same_card = 1;
-      for (i = 0; i < 4; i++)
-      {
-        if (uid[i] != last_uid[i])
-        {
-          same_card = 0;
-          break;
-        }
-      }
+  // Wait a bit for system initialization
+  vTaskDelay(500);
+  
+  UART_Send_String("\r\n==================================\r\n");
+  UART_Send_String("        Card Write Task\r\n");
+  UART_Send_String("==================================\r\n");
+  sprintf(msg, "Junction Type: %d\r\n", WRITE_JUNCTION_TYPE);
+  UART_Send_String(msg);
+  UART_Send_String("Put card to write...\r\n");
+  UART_Send_String("(Writes only 1 card per power cycle)\r\n");
+  
+  for(;;) {
+    // Only run when in write mode
+    if (system_mode == 0) {
+      status = MFRC522_Check(uid);
       
-      if (!same_card)
-      {
-        for (i = 0; i < 4; i++)
-        {
-          last_uid[i] = uid[i];
+      if (status == MI_OK) {
+        // Check if it's the same card or already written
+        same_card = 1;
+        for (i = 0; i < 4; i++) {
+          if (uid[i] != last_uid[i]) {
+            same_card = 0;
+            break;
+          }
         }
         
-        UART_Send_UID(uid, 4);
-      }
-    }
-    else if (status == MI_NOTAGERR)
-    {
-      for (i = 0; i < 4; i++)
-      {
-        last_uid[i] = 0;
+        if (!same_card && !card_written) {
+          // Update card record
+          for (i = 0; i < 4; i++) {
+            last_uid[i] = uid[i];
+          }
+          
+          UART_Send_String("\nCard detected!\r\n");
+          UART_Send_UID(uid, 4);
+          
+          // Write based on configured junction type
+          if (WRITE_JUNCTION_TYPE == 1) {
+            UART_Send_String("Writing Junction A...\r\n");
+            if (WriteJunctionA(uid) == MI_OK) {
+              UART_Send_String("Write success!\r\n");
+              card_written = 1;
+            }
+          } else if (WRITE_JUNCTION_TYPE == 2) {
+            UART_Send_String("Writing Junction B...\r\n");
+            if (WriteJunctionB(uid) == MI_OK) {
+              UART_Send_String("Write success!\r\n");
+              card_written = 1;
+            }
+          } else if (WRITE_JUNCTION_TYPE == 3) {
+            UART_Send_String("Writing Junction C...\r\n");
+            if (WriteJunctionC(uid) == MI_OK) {
+              UART_Send_String("Write success!\r\n");
+              card_written = 1;
+            }
+          }
+          
+          if (card_written) {
+            UART_Send_String("\r\nDone! Restart to write another card.\r\n");
+          }
+          
+          for (i = 0; i < 4; i++) last_uid[i] = 0;
+        }
+      } else if (status == MI_NOTAGERR) {
+        for (i = 0; i < 4; i++) last_uid[i] = 0;
       }
     }
     
     vTaskDelay(100);
   }
 }
+
+// ==================== Card Navigation Task ====================
+void CardNavTask(void *argument) {
+  uint8_t uid[5];
+  uint8_t last_uid[5] = {0};
+  uint8_t status;
+  uint8_t i;
+  uint8_t same_card;
+  char msg[80];
+  
+  // Wait a bit for system initialization
+  vTaskDelay(600);
+  
+  UART_Send_String("\r\n==================================\r\n");
+  UART_Send_String("     Navigation Task Started\r\n");
+  UART_Send_String("==================================\r\n");
+  sprintf(msg, "Target Room: %d\r\n", target_room);
+  UART_Send_String(msg);
+  UART_Send_String("Put junction card to get direction...\r\n");
+  
+  for(;;) {
+    // Always in navigation mode
+    status = MFRC522_Check(uid);
+    
+    if (status == MI_OK) {
+      // Check if it's the same card
+      same_card = 1;
+      for (i = 0; i < 4; i++) {
+        if (uid[i] != last_uid[i]) {
+          same_card = 0;
+          break;
+        }
+      }
+      
+      if (!same_card) {
+        // Update card record
+        for (i = 0; i < 4; i++) {
+          last_uid[i] = uid[i];
+        }
+        
+        UART_Send_String("\nJunction card detected!\r\n");
+        UART_Send_UID(uid, 4);
+        Nav_ProcessJunction(uid);
+      }
+    } else if (status == MI_NOTAGERR) {
+      for (i = 0; i < 4; i++) last_uid[i] = 0;
+    }
+    
+    vTaskDelay(100);
+  }
+}
+

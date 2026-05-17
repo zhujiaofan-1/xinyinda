@@ -106,7 +106,9 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   
-  osThreadNew(MFRC522_Task, NULL, &defaultTask_attributes);
+  // Create navigation task only (write task disabled)
+  // osThreadNew(CardWriteTask, NULL, &defaultTask_attributes);  // Write task disabled
+  osThreadNew(CardNavTask, NULL, &defaultTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -137,8 +139,6 @@ void StartDefaultTask(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-
-
 
 /* USER CODE END Application */
 
