@@ -11,4 +11,6 @@ void HCSR04_Init(void);
 
 float HCSR04_Get_Distance(void);
 
+extern volatile float g_ultrasonic_distance;
+
 #endif

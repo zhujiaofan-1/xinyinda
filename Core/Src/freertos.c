@@ -69,6 +69,18 @@ const osThreadAttr_t lcdShowTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 
+const osThreadAttr_t irtrackingTask_attributes = {
+  .name = "irtrackingTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
+const osThreadAttr_t avoidanceTask_attributes = {
+  .name = "avoidanceTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 
@@ -88,7 +100,12 @@ void MX_FREERTOS_Init(void) {
   InitDelay(168);
   IIC_init();
   IIC2_init();
+  xMotorMutex = xSemaphoreCreateMutex();
   Motor_Init();
+  HCSR04_Init();
+  Servo_Init();
+  HAL_TIM_Base_Start(&htim3);
+  Avoidance_Semaphore_Init();
 
 
 
@@ -117,9 +134,11 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  // osThreadNew(CardNavTask, NULL, &cardNavTask_attributes);
-  // osThreadNew(LCD_Show_Task, NULL, &lcdShowTask_attributes);
-  osThreadNew(MotorTestTask, NULL, &cardNavTask_attributes);
+  osThreadNew(car_walking, NULL, &cardNavTask_attributes);
+  osThreadNew(LCD_Show_Task, NULL, &lcdShowTask_attributes);
+  osThreadNew(irtracking_Task, NULL, &irtrackingTask_attributes);
+  osThreadNew(Avoidance_Task, NULL, &avoidanceTask_attributes);
+  su03t_Init();
   
 
   /* USER CODE END RTOS_THREADS */

@@ -2,6 +2,8 @@
 #define __MOTOR_H__
 
 #include "stdint.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
 
 
 #define CAM_DEFAULT_I2C_ADDRESS       (0x34)			//I2C地址
@@ -18,6 +20,8 @@
 #define MOTOR_TYPE_TT                     1 		//TT编码电机
 #define MOTOR_TYPE_N20                    2 		//N20编码电机
 #define MOTOR_TYPE_JGB                    3 		//磁环每转是44个脉冲   减速比:90  默认
+
+extern SemaphoreHandle_t xMotorMutex;
 
 void Motor_Set_Speed(motor_speed_t speed);
 void Motor_Init(void);

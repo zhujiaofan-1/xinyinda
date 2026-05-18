@@ -1,6 +1,5 @@
 #include "Headfile.h"
 #include "LCD_Show.h"
-#include "navigation.h"
 #include "Turn.h"
 
 
@@ -29,31 +28,15 @@ void LCD_Show_Task(void* param)
 {
     
     LCD_Show_Init();
-    Servo_Init();
-    MFRC522_Init();
-	volatile int i = 0;
     char Text[20];
-    HAL_TIM_Base_Start(&htim3);
     
     volatile uint16_t V = 0;
     
-    motor_speed_t speed;
-    speed.speed_m1 = 0;
-    speed.speed_m2 = 0;
-    speed.speed_m3 = 0;
-    speed.speed_m4 = 0;
-
     motor_encoder_t Encoder;
-
-    uint16_t Angle = 90;
-    int8_t dir = 1;
-
-    uint32_t last_time = 0;
     
     while (1)
     {
         
-        Motor_Set_Speed(speed);
         Motor_Get_Encoder(&Encoder);
         
         snprintf(Text, sizeof(Text), "Encoder = %d        ", Encoder.encoder_m1);
@@ -63,8 +46,7 @@ void LCD_Show_Task(void* param)
 		snprintf(Text, sizeof(Text), "V = %dmV       ", V);
         LCD_DisplayText(10, 40, Text);
 
-        float distance = HCSR04_Get_Distance();
-        snprintf(Text, sizeof(Text), "Distance = %.2f      ", distance);
+        snprintf(Text, sizeof(Text), "Distance = %.2f      ", g_ultrasonic_distance);
         LCD_DisplayText(10, 60, Text);
 
         // if(distance <= 5.0f && HAL_GetTick() - last_time > 1000)
@@ -93,16 +75,21 @@ void LCD_Show_Task(void* param)
 
         // Servo_SetAngle(Angle);
 
-        uint8_t s1,s2,s3,s4,s5,s6,s7,s8;
-        irtacking_Read(&s1,&s2,&s3,&s4,&s5,&s6,&s7,&s8);
-        snprintf(Text, sizeof(Text), "%d%d%d%d%d%d%d%d", s1,s2,s3,s4,s5,s6,s7,s8);
-        LCD_DisplayText(10, 80, Text);
+        // IR传感器数据由irtracking_Task独占读取，LCD不再直接访问I2C2避免冲突
+        // 如需查看IR数据，可通过irtracking模块的全局变量获取
+        LCD_DisplayText(10, 80, "IR:See Task     ");
 
         // RC522由CardNavTask独占访问，LCD不再直接读取RFID
         // 显示卡片内容（由CardNavTask写入turn_card_content）
         if(turn_card_content[0] != '\0')
         {
-            snprintf(Text, sizeof(Text), "Card:%s          ", turn_card_content);
+            char card_buf[17];
+            for(int i = 0; i < 16; i++) {
+                card_buf[i] = turn_card_content[i];
+                if(card_buf[i] == '\0') break;
+            }
+            card_buf[16] = '\0';
+            snprintf(Text, sizeof(Text), "Card:%s          ", card_buf);
             LCD_DisplayText(10, 100, Text);
         }
         else
@@ -124,17 +111,26 @@ void LCD_Show_Task(void* param)
         snprintf(Text, sizeof(Text), "Target:%d        ", turn_target_room);
         LCD_DisplayText(10, 140, Text);
         
+        // 显示导航状态
+        switch(nav_state)
+        {
+            case NAV_IDLE:      LCD_DisplayText(10, 160, "State:Idle      "); break;
+            case NAV_GOING:     LCD_DisplayText(10, 160, "State:Going     "); break;
+            case NAV_RETURNING: LCD_DisplayText(10, 160, "State:Return    "); break;
+            default:            LCD_DisplayText(10, 160, "State:Unknown   "); break;
+        }
+        
         // 显示转向方向
         if(turn_action_valid)
         {
             switch(turn_action)
             {
-                case TURN_STRAIGHT: LCD_DisplayText(10, 160, "Dir:Straight    "); break;
-                case TURN_LEFT:     LCD_DisplayText(10, 160, "Dir:Left        "); break;
-                case TURN_RIGHT:    LCD_DisplayText(10, 160, "Dir:Right       "); break;
-                case TURN_UTURN:    LCD_DisplayText(10, 160, "Dir:U-Turn      "); break;
-                case TURN_ERROR:    LCD_DisplayText(10, 160, "Dir:Error       "); break;
-                default:            LCD_DisplayText(10, 160, "Dir:Unknown     "); break;
+                case TURN_STRAIGHT: LCD_DisplayText(10, 180, "Dir:Straight    "); break;
+                case TURN_LEFT:     LCD_DisplayText(10, 180, "Dir:Left        "); break;
+                case TURN_RIGHT:    LCD_DisplayText(10, 180, "Dir:Right       "); break;
+                case TURN_UTURN:    LCD_DisplayText(10, 180, "Dir:U-Turn      "); break;
+                case TURN_ERROR:    LCD_DisplayText(10, 180, "Dir:Error       "); break;
+                default:            LCD_DisplayText(10, 180, "Dir:Unknown     "); break;
             }
         }
         

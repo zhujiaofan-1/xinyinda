@@ -176,49 +176,37 @@ uint8_t IIC_read_byte(uint8_t ack)
 uint8_t I2C_Read_Len(uint8_t Reg,uint8_t *Buf,uint8_t Len)
 {
 	uint8_t i;
-	// 第一步：发送起始信号
 	IIC_start();
-	// 第二步：发送7位设备地址+写标志位(0)，通知从设备准备接收寄存器地址
-	// CAM_DEFAULT_I2C_ADDRESS << 1 将7位地址左移，最低位0表示写操作
 	IIC_send_byte((CAM_DEFAULT_I2C_ADDRESS << 1) | 0);
-	if(IIC_wait_ack() == 1)  // 等待从设备ACK，失败则停止并返回错误
+	if(IIC_wait_ack() == 1)
 	{
 		IIC_stop();
 		return 1;
 	}
-	// 第三步：发送要读取的寄存器地址
 	IIC_send_byte(Reg);
 	if(IIC_wait_ack() == 1)
 	{
 		IIC_stop();
 		return 1;
 	}
-	// 第四步：发送重复起始信号(Repeated START)，切换为读操作
-	// 重复START不需要先发送STOP，直接开始新的通信
 	IIC_start();
-	// 第五步：发送7位设备地址+读标志位(1)，通知从设备准备发送数据
 	IIC_send_byte((CAM_DEFAULT_I2C_ADDRESS << 1) | 1);
 	if(IIC_wait_ack() == 1)
 	{
 		IIC_stop();
 		return 1;
 	}
-	// 第六步：循环读取指定长度的数据
 	for(i=0;i<Len;i++)
 	{
-		// 如果不是最后一个字节，发送ACK表示继续接收
-		// 如果是最后一个字节，发送NACK表示接收完毕
 		if(i != Len-1)
-			Buf[i] = IIC_read_byte(1);  // 1表示发送ACK
+			Buf[i] = IIC_read_byte(1);
 		else
-			Buf[i] = IIC_read_byte(0);  // 0表示发送NACK
+			Buf[i] = IIC_read_byte(0);
 	}
-	// 第七步：发送停止信号，释放I2C总线
 	IIC_stop();
-	return 0;  // 返回0表示读取成功
+	return 0;
 }
 
-// 写数据（不动）
 int8_t I2C_Write_Len(int8_t Reg,int8_t *Buf,int8_t Len)
 {
 	uint8_t i;
@@ -428,7 +416,6 @@ uint8_t I2C2_Read_Len(uint8_t Reg,uint8_t *Buf,uint8_t Len)
 	return 0;
 }
 
-// 写数据
 int8_t I2C2_Write_Len(int8_t Reg,int8_t *Buf,int8_t Len)
 {
 	uint8_t i;

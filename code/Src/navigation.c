@@ -13,10 +13,7 @@ uint16_t target_room = 102;  // 默认目标房间
 // 导航同步变量
 volatile uint8_t nav_direction = DIR_UNKNOWN;
 volatile uint8_t nav_ready = 0;
-SemaphoreHandle_t xNavSemaphore = NULL;
-
-// 导航状态
-uint8_t nav_state = NAV_GO_TO_ROOM;
+extern SemaphoreHandle_t xNavSemaphore;
 
 // LCD显示用变量
 volatile uint8_t lcd_uid[5] = {0};

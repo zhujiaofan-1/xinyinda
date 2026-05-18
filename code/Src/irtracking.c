@@ -65,12 +65,7 @@ int pid_output_IRR = 0;
 uint8_t crossroad_state = 0;
 
 // 十字路口直行目标编码器值（根据实际距离调整）
-#define CROSSROAD_ENCODER_TARGET 500  // 直行目标脉冲数
-
-// 导航转向编码器目标值（电机旋转一周=11个编码值）
-#define TURN_ENCODER_90   3   // 90度转向约3个编码值
-#define TURN_ENCODER_180  6   // 180度转向约6个编码值
-#define TURN_ENCODER_STRAIGHT 50  // 直行通过路口
+#define CROSSROAD_ENCODER_TARGET 500
 
 /**
  * @brief  位置式PID计算巡线偏差
@@ -174,6 +169,7 @@ uint8_t LineWalking(void)
 						Motor_Get_Encoder(&enc);
 						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
 						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+						vTaskDelay(pdMS_TO_TICKS(10));
 					} while(avg_enc < TURN_ENCODER_STRAIGHT);
 					break;
 					
@@ -183,6 +179,7 @@ uint8_t LineWalking(void)
 						Motor_Get_Encoder(&enc);
 						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
 						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+						vTaskDelay(pdMS_TO_TICKS(10));
 					} while(avg_enc < TURN_ENCODER_90);
 					break;
 					
@@ -192,6 +189,7 @@ uint8_t LineWalking(void)
 						Motor_Get_Encoder(&enc);
 						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
 						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+						vTaskDelay(pdMS_TO_TICKS(10));
 					} while(avg_enc < TURN_ENCODER_90);
 					break;
 					
@@ -201,6 +199,7 @@ uint8_t LineWalking(void)
 						Motor_Get_Encoder(&enc);
 						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
 						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+						vTaskDelay(pdMS_TO_TICKS(10));
 					} while(avg_enc < TURN_ENCODER_180);
 					break;
 					

@@ -245,16 +245,15 @@ void USART2_IRQHandler(void)
 {
   /* USER CODE BEGIN USART2_IRQn 0 */
 
-  	// 检测 UART2 空闲中断
   if(__HAL_UART_GET_FLAG(&huart2, UART_FLAG_IDLE))
   {
-      __HAL_UART_CLEAR_IDLEFLAG(&huart2);  // 清除空闲中断标志
-      HAL_UART_DMAStop(&huart2);             // 停止 DMA 接收，准备处理数据
+      __HAL_UART_CLEAR_IDLEFLAG(&huart2);
+      HAL_UART_DMAStop(&huart2);
 
       BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-      // 给 UART2 接收任务发送通知
       vTaskNotifyGiveFromISR(xUART2_Recv_Task_Handle, &xHigherPriorityTaskWoken); 
       portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+      return;
   }
 
   /* USER CODE END USART2_IRQn 0 */

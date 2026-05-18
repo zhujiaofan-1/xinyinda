@@ -1,7 +1,5 @@
 #include "Mytask.h"
 #include "Headfile.h"
-#include "junction_writer.h"
-#include "navigation.h"
 #include "Turn.h"
 #include "usart.h"
 
@@ -9,6 +7,12 @@ SemaphoreHandle_t xAvoidSemaphore = NULL;
 
 // 系统模式：0=写卡模式，1=导航模式
 volatile uint8_t system_mode = 1;  // 默认导航模式
+
+void Avoidance_Semaphore_Init(void)
+{
+    xAvoidSemaphore = xSemaphoreCreateBinary();
+    xSemaphoreGive(xAvoidSemaphore);
+}
 
 // 避障状态机
 enum {
@@ -27,11 +31,6 @@ enum {
 
 void Avoidance_Task(void* param)
 {
-    Servo_Init();
-    HCSR04_Init();
-    xAvoidSemaphore = xSemaphoreCreateBinary();
-    xSemaphoreGive(xAvoidSemaphore);
-
     static float distance;
     static uint8_t avoid_state = AVOID_NORMAL;
     static float left_dist = 0, right_dist = 0;
@@ -42,7 +41,13 @@ void Avoidance_Task(void* param)
 
     while(1)
     {
+        if(nav_state != NAV_GOING && nav_state != NAV_RETURNING) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         distance = HCSR04_Get_Distance();
+        g_ultrasonic_distance = distance;
 
         switch(avoid_state)
         {
@@ -177,12 +182,11 @@ void Avoidance_Task(void* param)
 //巡线任务
 void irtracking_Task(void* param)
 {
-    uint8_t s1,s2,s3,s4,s5,s6,s7,s8;
 
     while(1)
     {
-        // 非阻塞获取信号量：获取成功执行巡线，获取失败说明正在避障则跳过
-        if(xSemaphoreTake(xAvoidSemaphore, 0) == pdPASS)
+        if((nav_state == NAV_GOING || nav_state == NAV_RETURNING) &&
+           xSemaphoreTake(xAvoidSemaphore, 0) == pdPASS)
         {
             LineWalking();
             xSemaphoreGive(xAvoidSemaphore);
@@ -192,96 +196,10 @@ void irtracking_Task(void* param)
     }
 }
 
-// ==================== 写卡配置 ====================
-// 选择要写入的路口数据：1=路口A，2=路口B，3=路口C
-#define WRITE_JUNCTION_TYPE  1
 
-// ==================== 写卡任务 ====================
-// 每次上电周期只写入一张卡
-// 修改上方的 WRITE_JUNCTION_TYPE 来选择数据类型(1/2/3)
-void CardWriteTask(void *argument) {
-  uint8_t uid[5];
-  uint8_t last_uid[5] = {0};
-  uint8_t status;
-  uint8_t i;
-  uint8_t same_card;
-  uint8_t card_written = 0;
-  char msg[80];
-  
-  // 等待系统初始化完成
-  vTaskDelay(500);
-  
-  UART_Send_String("\r\n==================================\r\n");
-  UART_Send_String("        Card Write Task\r\n");
-  UART_Send_String("==================================\r\n");
-  sprintf(msg, "Junction Type: %d\r\n", WRITE_JUNCTION_TYPE);
-  UART_Send_String(msg);
-  UART_Send_String("Put card to write...\r\n");
-  UART_Send_String("(Writes only 1 card per power cycle)\r\n");
-  
-  for(;;) {
-    // 仅在写卡模式下运行
-    if (system_mode == 0) {
-      status = MFRC522_Check(uid);
-      
-      if (status == MI_OK) {
-        // 检查是否为同一张卡或已写入过
-        same_card = 1;
-        for (i = 0; i < 4; i++) {
-          if (uid[i] != last_uid[i]) {
-            same_card = 0;
-            break;
-          }
-        }
-        
-        if (!same_card && !card_written) {
-          // 更新卡号记录
-          for (i = 0; i < 4; i++) {
-            last_uid[i] = uid[i];
-          }
-          
-          UART_Send_String("\nCard detected!\r\n");
-          UART_Send_UID(uid, 4);
-          
-          // 根据配置的路口类型写入
-          if (WRITE_JUNCTION_TYPE == 1) {
-            UART_Send_String("Writing Junction A...\r\n");
-            if (WriteJunctionA(uid) == MI_OK) {
-              UART_Send_String("Write success!\r\n");
-              card_written = 1;
-            }
-          } else if (WRITE_JUNCTION_TYPE == 2) {
-            UART_Send_String("Writing Junction B...\r\n");
-            if (WriteJunctionB(uid) == MI_OK) {
-              UART_Send_String("Write success!\r\n");
-              card_written = 1;
-            }
-          } else if (WRITE_JUNCTION_TYPE == 3) {
-            UART_Send_String("Writing Junction C...\r\n");
-            if (WriteJunctionC(uid) == MI_OK) {
-              UART_Send_String("Write success!\r\n");
-              card_written = 1;
-            }
-          }
-          
-          if (card_written) {
-            UART_Send_String("\r\nDone! Restart to write another card.\r\n");
-          }
-          
-          for (i = 0; i < 4; i++) last_uid[i] = 0;
-        }
-      } else if (status == MI_NOTAGERR) {
-        // 没有检测到卡片，清除卡号记录
-        for (i = 0; i < 4; i++) last_uid[i] = 0;
-      }
-    }
-    
-    vTaskDelay(100);
-  }
-}
-
-// ==================== RFID导航任务 ====================
-void CardNavTask(void *argument) {
+//RFID导航联动
+void car_walking(void *param)
+{
   uint8_t uid[5];
   uint8_t last_uid[5] = {0};
   uint8_t status;
@@ -291,25 +209,20 @@ void CardNavTask(void *argument) {
   uint8_t key[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   TurnInfo_t turn_info[MAX_TURN_DATA];
   uint8_t turn_count = 0;
-  char msg[80];
+  uint16_t room_num;
+  uint8_t is_room_card;
+  motor_encoder_t enc;
+  int32_t avg_enc;
   
-  vTaskDelay(600);
+  xNavSemaphore = xSemaphoreCreateBinary();
   
-  Turn_Init(DIR_S, 3);
+  Turn_Init(DIR_S, 0);
+  nav_state = NAV_IDLE;
   
-  UART_Send_String("\r\n==================================\r\n");
-  UART_Send_String("     Navigation Task Started\r\n");
-  UART_Send_String("==================================\r\n");
-  sprintf(msg, "Target Room: %d\r\n", turn_target_room);
-  UART_Send_String(msg);
-  sprintf(msg, "Start Dir: %s\r\n", Turn_DirToString(turn_current_dir));
-  UART_Send_String(msg);
-  
-  for(;;) {
-    // 清空UID
+  while(1)
+  {
     for (i = 0; i < 5; i++) uid[i] = 0;
     
-    // 第1步：寻卡
     status = MFRC522_Request(PICC_REQALL, uid);
     if (status != MI_OK) {
       for (i = 0; i < 4; i++) last_uid[i] = 0;
@@ -317,14 +230,12 @@ void CardNavTask(void *argument) {
       continue;
     }
     
-    // 第2步：防冲突
     status = MFRC522_Anticoll(uid);
     if (status != MI_OK) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
     
-    // 检查是否同一张卡
     same_card = 1;
     for (i = 0; i < 4; i++) {
       if (uid[i] != last_uid[i]) {
@@ -337,73 +248,232 @@ void CardNavTask(void *argument) {
       continue;
     }
     
-    // 更新卡号记录
     for (i = 0; i < 4; i++) last_uid[i] = uid[i];
     
-    // 第3步：选择卡片
     uid[4] = uid[0] ^ uid[1] ^ uid[2] ^ uid[3];
     if (MFRC522_SelectTag(uid) == 0) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
     
-    // 第4步：认证
     status = MFRC522_Auth(PICC_AUTHENT1A, 1, key, uid);
     if (status != MI_OK) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
     
-    // 第5步：读取Block 1
     status = MFRC522_Read(1, block_data);
     if (status != MI_OK) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
-    
-    UART_Send_String("\nCard detected!\r\n");
-    UART_Send_UID(uid, 4);
-    
-    // 保存卡片内容到LCD显示变量
+
     for (i = 0; i < 16; i++) {
       turn_card_content[i] = block_data[i];
       if (block_data[i] == 0) break;
     }
     turn_card_content[i] = '\0';
-    
-    // 解析卡片数据
+
+    // 尝试解析为路口卡(N34S0W2E15格式)
     if (Turn_ParseData(block_data, turn_info, &turn_count) == MI_OK) {
-      turn_action = Turn_CalculateTurn(turn_current_dir, turn_target_room, turn_info, turn_count);
+      if (turn_target_room == 0) {
+        // 返航模式：计算返回南方的转向
+        turn_action = Turn_CalculateReturn(turn_current_dir);
+      } else {
+        // 正常导航：根据目标房间计算转向
+        turn_action = Turn_CalculateTurn(turn_current_dir, turn_target_room, turn_info, turn_count);
+      }
       turn_action_valid = 1;
-      
-      sprintf(msg, "Card: %s\r\n", turn_card_content);
-      UART_Send_String(msg);
-      sprintf(msg, "Current Dir: %s\r\n", Turn_DirToString(turn_current_dir));
-      UART_Send_String(msg);
-      sprintf(msg, "Turn: %s\r\n", Turn_TurnToString(turn_action));
-      UART_Send_String(msg);
-      
+
       if (turn_action != TURN_ERROR) {
         turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
-        sprintf(msg, "New Dir: %s\r\n", Turn_DirToString(turn_current_dir));
-        UART_Send_String(msg);
       }
-      
       if(xNavSemaphore != NULL) {
         xSemaphoreGive(xNavSemaphore);
       }
     } else {
-      UART_Send_String("Parse card data failed\r\n");
-      turn_action_valid = 0;
+      // 非路口卡，检查是否为房间卡(纯数字)
+      is_room_card = 1;
+      room_num = 0;
+      for (i = 0; i < 16 && block_data[i] != 0; i++) {
+        if (block_data[i] >= '0' && block_data[i] <= '9') {
+          room_num = room_num * 10 + (block_data[i] - '0');
+        } else {
+          is_room_card = 0;
+          break;
+        }
+      }
+      
+      if (is_room_card) {
+        if (nav_state == NAV_GOING && room_num == turn_target_room) {
+          nav_state = NAV_IDLE;
+          if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(1000)) == pdPASS) {
+            Motion_Ctrl(0, 0, 0, 0);
+            xSemaphoreGive(xAvoidSemaphore);
+          }
+          vTaskDelay(pdMS_TO_TICKS(5000));
+          
+          if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(1000)) == pdPASS) {
+            Motor_Reset_Encoder();
+            Motion_Ctrl(0, 0, -60, 0);
+            do {
+              Motor_Get_Encoder(&enc);
+              avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
+                       + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+              vTaskDelay(pdMS_TO_TICKS(10));
+            } while(avg_enc < TURN_ENCODER_180);
+            Motion_Ctrl(0, 0, 0, 0);
+            xSemaphoreGive(xAvoidSemaphore);
+          }
+          
+          turn_current_dir = Turn_UpdateDirection(turn_current_dir, TURN_UTURN);
+          turn_target_room = 0;
+          nav_state = NAV_RETURNING;
+        } else if (nav_state == NAV_RETURNING && room_num == 0) {
+          nav_state = NAV_IDLE;
+          if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(1000)) == pdPASS) {
+            Motion_Ctrl(0, 0, 0, 0);
+            xSemaphoreGive(xAvoidSemaphore);
+          }
+        }
+      }
     }
     
-    // 清理RC522状态：关闭加密单元，清空FIFO，为读下一张卡做准备
     MFRC522_ClearBitMask(MFRC522_REG_STATUS2, 0x08);
     MFRC522_SetBitMask(MFRC522_REG_FIFO_LEVEL, 0x80);
     
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
+
+
+
+
+// // ==================== RFID导航任务 ====================
+// void CardNavTask(void *argument) {
+//   uint8_t uid[5];
+//   uint8_t last_uid[5] = {0};
+//   uint8_t status;
+//   uint8_t i;
+//   uint8_t same_card;
+//   uint8_t block_data[16];
+//   uint8_t key[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+//   TurnInfo_t turn_info[MAX_TURN_DATA];
+//   uint8_t turn_count = 0;
+//   char msg[80];
+  
+//   vTaskDelay(600);
+  
+//   Turn_Init(DIR_S, 3);
+  
+//   UART_Send_String("\r\n==================================\r\n");
+//   UART_Send_String("     Navigation Task Started\r\n");
+//   UART_Send_String("==================================\r\n");
+//   sprintf(msg, "Target Room: %d\r\n", turn_target_room);
+//   UART_Send_String(msg);
+//   sprintf(msg, "Start Dir: %s\r\n", Turn_DirToString(turn_current_dir));
+//   UART_Send_String(msg);
+  
+//   for(;;) {
+//     // 清空UID
+//     for (i = 0; i < 5; i++) uid[i] = 0;
+    
+//     // 第1步：寻卡
+//     status = MFRC522_Request(PICC_REQALL, uid);
+//     if (status != MI_OK) {
+//       for (i = 0; i < 4; i++) last_uid[i] = 0;
+//       vTaskDelay(pdMS_TO_TICKS(100));
+//       continue;
+//     }
+    
+//     // 第2步：防冲突
+//     status = MFRC522_Anticoll(uid);
+//     if (status != MI_OK) {
+//       vTaskDelay(pdMS_TO_TICKS(100));
+//       continue;
+//     }
+    
+//     // 检查是否同一张卡
+//     same_card = 1;
+//     for (i = 0; i < 4; i++) {
+//       if (uid[i] != last_uid[i]) {
+//         same_card = 0;
+//         break;
+//       }
+//     }
+//     if (same_card) {
+//       vTaskDelay(pdMS_TO_TICKS(100));
+//       continue;
+//     }
+    
+//     // 更新卡号记录
+//     for (i = 0; i < 4; i++) last_uid[i] = uid[i];
+    
+//     // 第3步：选择卡片
+//     uid[4] = uid[0] ^ uid[1] ^ uid[2] ^ uid[3];
+//     if (MFRC522_SelectTag(uid) == 0) {
+//       vTaskDelay(pdMS_TO_TICKS(100));
+//       continue;
+//     }
+    
+//     // 第4步：认证
+//     status = MFRC522_Auth(PICC_AUTHENT1A, 1, key, uid);
+//     if (status != MI_OK) {
+//       vTaskDelay(pdMS_TO_TICKS(100));
+//       continue;
+//     }
+    
+//     // 第5步：读取Block 1
+//     status = MFRC522_Read(1, block_data);
+//     if (status != MI_OK) {
+//       vTaskDelay(pdMS_TO_TICKS(100));
+//       continue;
+//     }
+    
+//     UART_Send_String("\nCard detected!\r\n");
+//     UART_Send_UID(uid, 4);
+    
+//     // 保存卡片内容到LCD显示变量
+//     for (i = 0; i < 16; i++) {
+//       turn_card_content[i] = block_data[i];
+//       if (block_data[i] == 0) break;
+//     }
+//     turn_card_content[i] = '\0';
+    
+
+//     // 解析卡片数据
+//     if (Turn_ParseData(block_data, turn_info, &turn_count) == MI_OK) {
+//       turn_action = Turn_CalculateTurn(turn_current_dir, turn_target_room, turn_info, turn_count);
+//       turn_action_valid = 1;
+      
+//       sprintf(msg, "Card: %s\r\n", turn_card_content);
+//       UART_Send_String(msg);
+//       sprintf(msg, "Current Dir: %s\r\n", Turn_DirToString(turn_current_dir));
+//       UART_Send_String(msg);
+//       sprintf(msg, "Turn: %s\r\n", Turn_TurnToString(turn_action));
+//       UART_Send_String(msg);
+      
+//       if (turn_action != TURN_ERROR) {
+//         turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
+//         sprintf(msg, "New Dir: %s\r\n", Turn_DirToString(turn_current_dir));
+//         UART_Send_String(msg);
+//       }
+      
+//       if(xNavSemaphore != NULL) {
+//         xSemaphoreGive(xNavSemaphore);
+//       }
+//     } else {
+//       UART_Send_String("Parse card data failed\r\n");
+//       turn_action_valid = 0;
+//     }
+    
+//     // 清理RC522状态：关闭加密单元，清空FIFO，为读下一张卡做准备
+//     MFRC522_ClearBitMask(MFRC522_REG_STATUS2, 0x08);
+//     MFRC522_SetBitMask(MFRC522_REG_FIFO_LEVEL, 0x80);
+    
+//     vTaskDelay(pdMS_TO_TICKS(1000));
+//   }
+// }
 
 /**
  * @brief  电机测试任务：依次测试前进、后退、左移、右移、左转、右转
@@ -414,37 +484,31 @@ void MotorTestTask(void *pvParameters)
   
   for(;;)
   {
-    // 顺时针旋转
     Motion_Ctrl(60, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(2000));
     Motion_Ctrl(0, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
     
-    // 逆时针旋转
     Motion_Ctrl(-60, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(2000));
     Motion_Ctrl(0, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
     
-    // 左移
     Motion_Ctrl(0, -60, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(2000));
     Motion_Ctrl(0, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
     
-    // 右移
     Motion_Ctrl(0, 60, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(2000));
     Motion_Ctrl(0, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
     
-    // 后退
     Motion_Ctrl(0, 0, -60, 0);
     vTaskDelay(pdMS_TO_TICKS(1500));
     Motion_Ctrl(0, 0, 0, 0);
     vTaskDelay(pdMS_TO_TICKS(1000));
     
-    // 前进
     Motion_Ctrl(0, 0, 60, 0);
     vTaskDelay(pdMS_TO_TICKS(1500));
     Motion_Ctrl(0, 0, 0, 0);

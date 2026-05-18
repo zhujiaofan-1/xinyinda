@@ -2,6 +2,7 @@
 #include "HCSR04.h"
 
 uint16_t TIM_CNT = 0;
+volatile float g_ultrasonic_distance = -1.0f;
 
 /**
  * @brief  获取超声波测距距离值
@@ -62,5 +63,5 @@ float HCSR04_Get_Distance(void)
 
 void HCSR04_Init(void)
 {
-	
+    HAL_TIM_Base_Start(&htim3);
 }

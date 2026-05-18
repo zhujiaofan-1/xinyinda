@@ -7,6 +7,11 @@
 #define IR_DEV_ADDR       0x12
 #define IR_READ_ADDR      0x30
 
+// 导航转向编码器目标值
+#define TURN_ENCODER_90         3
+#define TURN_ENCODER_180        6
+#define TURN_ENCODER_STRAIGHT   50
+
 extern uint8_t crossroad_state;  // 十字路口状态机：0=未检测, 1=已检测正在直行, 2=停车读卡
 
 void irtacking_Read(uint8_t *s1,uint8_t *s2,uint8_t *s3,uint8_t *s4,uint8_t *s5,uint8_t *s6,uint8_t *s7,uint8_t *s8);

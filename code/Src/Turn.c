@@ -10,6 +10,20 @@ volatile uint16_t turn_target_room = 0;        // 目标房间号
 volatile uint8_t turn_action = TURN_ERROR;     // 转向动作
 volatile uint8_t turn_action_valid = 0;        // 转向动作有效标志
 volatile char turn_card_content[17] = {0};     // 卡片内容字符串
+volatile uint8_t nav_state = NAV_IDLE;         // 导航状态
+SemaphoreHandle_t xNavSemaphore = NULL;        // 导航同步信号量
+
+
+
+void Turn_GoRoom(uint16_t room)
+{
+    turn_target_room = room;  
+    if (room != 0) {
+        nav_state = NAV_GOING;
+    } else {
+        nav_state = NAV_RETURNING;
+    }
+}
 
 /**
  * @brief  初始化Turn模块
@@ -34,8 +48,6 @@ uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
     case TURN_STRAIGHT:
       return current_dir;
     case TURN_LEFT:
-      // 左转：逆时针 N→W→S→E→N
-      // 例如：从南边左转，新朝向方位为西边
       switch (current_dir) {
         case DIR_N: return DIR_W;
         case DIR_W: return DIR_S;
@@ -44,7 +56,6 @@ uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
         default: return current_dir;
       }
     case TURN_RIGHT:
-      // 右转：顺时针 N→E→S→W→N
       switch (current_dir) {
         case DIR_N: return DIR_E;
         case DIR_E: return DIR_S;
@@ -53,7 +64,6 @@ uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
         default: return current_dir;
       }
     case TURN_UTURN:
-      // 掉头：取反 N↔S, W↔E
       switch (current_dir) {
         case DIR_N: return DIR_S;
         case DIR_S: return DIR_N;
@@ -63,6 +73,21 @@ uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
       }
     default:
       return current_dir;
+  }
+}
+
+/**
+ * @brief  返航导航：根据当前方向计算返回南方(起始点)的转向
+ * @param  current_dir: 小车当前所在方向（来的方向）
+ * @retval 转向动作
+ */
+uint8_t Turn_CalculateReturn(uint8_t current_dir) {
+  switch (current_dir) {
+    case DIR_S: return TURN_UTURN;      // 从南方来(朝北走)，掉头回南
+    case DIR_N: return TURN_STRAIGHT;    // 从北方来(朝南走)，直行
+    case DIR_W: return TURN_RIGHT;       // 从西方来(朝东走)，右转朝南
+    case DIR_E: return TURN_LEFT;        // 从东方来(朝西走)，左转朝南
+    default: return TURN_ERROR;
   }
 }
 

@@ -170,35 +170,11 @@ uint8_t uart_rx_data = 0;
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-  if (huart->Instance == USART2)
-  {
-    // Echo received character
-    HAL_UART_Transmit(&huart2, &uart_rx_data, 1, HAL_MAX_DELAY);
-    
-    // Handle mode switch commands
-    if (uart_rx_data == 'w' || uart_rx_data == 'W') {
-      system_mode = 0;
-      UART_Send_String("\r\nSwitched to WRITE MODE\r\n");
-      UART_Send_String("Put card to write Junction A, B, or C...\r\n");
-    } else if (uart_rx_data == 'n' || uart_rx_data == 'N') {
-      system_mode = 1;
-      UART_Send_String("\r\nSwitched to NAVIGATION MODE\r\n");
-      UART_Send_String("Put junction card to get direction...\r\n");
-    } else if (uart_rx_data == 'h' || uart_rx_data == 'H') {
-      UART_Send_String("\r\n=== Help ===\r\n");
-      UART_Send_String("w - Switch to Write Mode\r\n");
-      UART_Send_String("n - Switch to Navigation Mode\r\n");
-      UART_Send_String("h - Show this help\r\n");
-      UART_Send_String("============\r\n");
-    }
-    
-    HAL_UART_Receive_IT(&huart2, &uart_rx_data, 1);
-  }
 }
 
 void UART_Test_Init(void)
 {
-  HAL_UART_Receive_IT(&huart2, &uart_rx_data, 1);
+  UART_Send_String("UART Test Ready!\r\n");
 }
 
 void UART_Send_String(const char *str)

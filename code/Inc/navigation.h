@@ -26,7 +26,6 @@ extern uint16_t target_room;
 extern volatile uint8_t nav_direction;      // 导航方向指令
 extern volatile uint8_t nav_ready;          // 导航指令就绪标志
 extern SemaphoreHandle_t xNavSemaphore;     // 导航同步信号量
-extern uint8_t nav_state;                   // 导航状态
 
 // LCD显示用变量
 extern volatile uint8_t lcd_uid[5];         // 最近读取的RFID卡号
