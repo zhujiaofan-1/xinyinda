@@ -57,6 +57,18 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 
+const osThreadAttr_t cardNavTask_attributes = {
+  .name = "cardNavTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
+const osThreadAttr_t lcdShowTask_attributes = {
+  .name = "lcdShowTask",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 
@@ -105,10 +117,10 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+  // osThreadNew(CardNavTask, NULL, &cardNavTask_attributes);
+  // osThreadNew(LCD_Show_Task, NULL, &lcdShowTask_attributes);
+  osThreadNew(MotorTestTask, NULL, &cardNavTask_attributes);
   
-  // Create navigation task only (write task disabled)
-  // osThreadNew(CardWriteTask, NULL, &defaultTask_attributes);  // Write task disabled
-  osThreadNew(CardNavTask, NULL, &defaultTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 

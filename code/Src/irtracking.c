@@ -1,5 +1,6 @@
 #include "irtracking.h"
 #include "Headfile.h"
+#include "Turn.h"
 
 /**
  * @brief  读取红外巡线模块8个传感器状态
@@ -65,6 +66,11 @@ uint8_t crossroad_state = 0;
 
 // 十字路口直行目标编码器值（根据实际距离调整）
 #define CROSSROAD_ENCODER_TARGET 500  // 直行目标脉冲数
+
+// 导航转向编码器目标值（电机旋转一周=11个编码值）
+#define TURN_ENCODER_90   3   // 90度转向约3个编码值
+#define TURN_ENCODER_180  6   // 180度转向约6个编码值
+#define TURN_ENCODER_STRAIGHT 50  // 直行通过路口
 
 /**
  * @brief  位置式PID计算巡线偏差
@@ -151,9 +157,61 @@ uint8_t LineWalking(void)
 	}
 	else if(crossroad_state == 2)
 	{
-		// 状态2：停车读卡完成，等待外部调用清除标志
-		// 保持停车状态，直到外部调用 Clear_Crossroad_Flag()
-		Motion_Ctrl(0, 0, 0, 0);
+		// 状态2：停车读卡完成，等待Turn模块导航指令
+		if(turn_action_valid && xSemaphoreTake(xNavSemaphore, pdMS_TO_TICKS(100)) == pdPASS)
+		{
+			motor_encoder_t enc;
+			int32_t avg_enc;
+			
+			Motor_Reset_Encoder();
+			
+			// 根据Turn模块计算的转向动作执行转向
+			switch(turn_action)
+			{
+				case TURN_STRAIGHT:
+					Motion_Ctrl(60, 0, 0, 0);
+					do {
+						Motor_Get_Encoder(&enc);
+						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
+						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+					} while(avg_enc < TURN_ENCODER_STRAIGHT);
+					break;
+					
+				case TURN_LEFT:
+					Motion_Ctrl(0, 0, -60, 0);
+					do {
+						Motor_Get_Encoder(&enc);
+						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
+						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+					} while(avg_enc < TURN_ENCODER_90);
+					break;
+					
+				case TURN_RIGHT:
+					Motion_Ctrl(0, 0, 60, 0);
+					do {
+						Motor_Get_Encoder(&enc);
+						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
+						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+					} while(avg_enc < TURN_ENCODER_90);
+					break;
+					
+				case TURN_UTURN:
+					Motion_Ctrl(0, 0, -60, 0);
+					do {
+						Motor_Get_Encoder(&enc);
+						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
+						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+					} while(avg_enc < TURN_ENCODER_180);
+					break;
+					
+				default:
+					break;
+			}
+			
+			Motion_Ctrl(0, 0, 0, 0);
+			turn_action_valid = 0;
+			Clear_Crossroad_Flag();
+		}
 		return 1;
 	}
 

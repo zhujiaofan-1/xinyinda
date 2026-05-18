@@ -1,5 +1,7 @@
 #include "Headfile.h"
 #include "LCD_Show.h"
+#include "navigation.h"
+#include "Turn.h"
 
 
 
@@ -47,9 +49,6 @@ void LCD_Show_Task(void* param)
     int8_t dir = 1;
 
     uint32_t last_time = 0;
-    
-    uint8_t CardID[5];
-    uint8_t card_found = 0;
     
     while (1)
     {
@@ -99,18 +98,43 @@ void LCD_Show_Task(void* param)
         snprintf(Text, sizeof(Text), "%d%d%d%d%d%d%d%d", s1,s2,s3,s4,s5,s6,s7,s8);
         LCD_DisplayText(10, 80, Text);
 
-        if(MFRC522_Check(CardID) == MI_OK)
+        // RC522由CardNavTask独占访问，LCD不再直接读取RFID
+        // 显示卡片内容（由CardNavTask写入turn_card_content）
+        if(turn_card_content[0] != '\0')
         {
-            snprintf(Text, sizeof(Text), "RC522:%02X%02X%02X%02X", CardID[0],CardID[1],CardID[2],CardID[3]);
+            snprintf(Text, sizeof(Text), "Card:%s          ", turn_card_content);
             LCD_DisplayText(10, 100, Text);
-            card_found = 1;
         }
         else
         {
-            if(card_found)
+            LCD_DisplayText(10, 100, "No Card         ");
+        }
+        
+        // 显示小车当前方位
+        switch(turn_current_dir)
+        {
+            case DIR_N: LCD_DisplayText(10, 120, "Pos:North       "); break;
+            case DIR_S: LCD_DisplayText(10, 120, "Pos:South       "); break;
+            case DIR_W: LCD_DisplayText(10, 120, "Pos:West        "); break;
+            case DIR_E: LCD_DisplayText(10, 120, "Pos:East        "); break;
+            default:    LCD_DisplayText(10, 120, "Pos:Unknown     "); break;
+        }
+        
+        // 显示目标房间
+        snprintf(Text, sizeof(Text), "Target:%d        ", turn_target_room);
+        LCD_DisplayText(10, 140, Text);
+        
+        // 显示转向方向
+        if(turn_action_valid)
+        {
+            switch(turn_action)
             {
-                LCD_DisplayText(10, 100, "No Card         ");
-                card_found = 0;
+                case TURN_STRAIGHT: LCD_DisplayText(10, 160, "Dir:Straight    "); break;
+                case TURN_LEFT:     LCD_DisplayText(10, 160, "Dir:Left        "); break;
+                case TURN_RIGHT:    LCD_DisplayText(10, 160, "Dir:Right       "); break;
+                case TURN_UTURN:    LCD_DisplayText(10, 160, "Dir:U-Turn      "); break;
+                case TURN_ERROR:    LCD_DisplayText(10, 160, "Dir:Error       "); break;
+                default:            LCD_DisplayText(10, 160, "Dir:Unknown     "); break;
             }
         }
         

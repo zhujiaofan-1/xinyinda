@@ -1,3 +1,4 @@
+#include "Headfile.h"
 #include "navigation.h"
 #include "rc522.h"
 #include "usart.h"
@@ -9,14 +10,19 @@ char* direction_str[] = {"Straight", "Left", "Right", "U-Turn", "Unknown"};
 // 当前目标房间
 uint16_t target_room = 102;  // 默认目标房间
 
-// 导航状态枚举
-typedef enum {
-  NAV_GO_TO_ROOM,      // 前往目标房间
-  NAV_RETURN_TO_START  // 返回起点
-} NavState;
+// 导航同步变量
+volatile uint8_t nav_direction = DIR_UNKNOWN;
+volatile uint8_t nav_ready = 0;
+SemaphoreHandle_t xNavSemaphore = NULL;
 
 // 导航状态
-static NavState nav_state = NAV_GO_TO_ROOM;
+uint8_t nav_state = NAV_GO_TO_ROOM;
+
+// LCD显示用变量
+volatile uint8_t lcd_uid[5] = {0};
+volatile uint8_t lcd_uid_valid = 0;
+volatile uint16_t lcd_room_number = 0;
+volatile uint8_t lcd_room_valid = 0;
 
 // 起点卡片UID（用于检测是否到达起点）
 uint8_t start_point_uid[4] = {0x11, 0x22, 0x33, 0x44};  // 默认起点卡片UID
@@ -32,8 +38,8 @@ uint8_t Nav_ReadJunctionData(uint8_t* uid, uint8_t* block_data) {
   uint8_t i;
   uint8_t tmp_uid[5];
   
-  // 重新唤醒卡片（因为之前的Check函数调用了Halt）
-  status = MFRC522_Request(PICC_REQIDL, tmp_uid);
+  // 重新唤醒卡片（使用WUPA，可唤醒被Halt休眠的卡片）
+  status = MFRC522_Request(PICC_REQALL, tmp_uid);
   if (status != MI_OK) {
     return status;
   }
@@ -68,6 +74,76 @@ uint8_t Nav_ReadJunctionData(uint8_t* uid, uint8_t* block_data) {
   MFRC522_Halt();
   
   return status;
+}
+
+// 读取房间门口卡片数据（Block 1前2字节存储房间号）
+uint8_t Nav_ReadRoomNumber(uint8_t* uid, uint16_t* room_number) {
+  uint8_t status;
+  uint8_t key[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // 默认密码
+  uint8_t uid_full[5];
+  uint8_t i;
+  uint8_t tmp_uid[5];
+  uint8_t block_data[16];
+  
+  // 重新唤醒卡片（使用WUPA，可唤醒被Halt休眠的卡片）
+  status = MFRC522_Request(PICC_REQALL, tmp_uid);
+  if (status != MI_OK) {
+    return status;
+  }
+  
+  // 重新获取UID（防冲突）
+  status = MFRC522_Anticoll(tmp_uid);
+  if (status != MI_OK) {
+    return status;
+  }
+  
+  // 复制UID并添加校验位
+  for (i = 0; i < 4; i++) {
+    uid_full[i] = tmp_uid[i];
+  }
+  uid_full[4] = tmp_uid[0] ^ tmp_uid[1] ^ tmp_uid[2] ^ tmp_uid[3];
+  
+  // 选择卡片
+  if (MFRC522_SelectTag(uid_full) == 0) {
+    return MI_ERR;
+  }
+  
+  // 认证扇区0
+  status = MFRC522_Auth(PICC_AUTHENT1A, 1, key, tmp_uid);
+  if (status != MI_OK) {
+    return status;
+  }
+  
+  // 读取Block 1
+  status = MFRC522_Read(1, block_data);
+  if (status == MI_OK) {
+    *room_number = (block_data[0] << 8) | block_data[1];
+  }
+  
+  // 让卡片休眠
+  MFRC522_Halt();
+  
+  return status;
+}
+
+// 检查是否到达目标房间
+uint8_t Nav_CheckDestination(uint8_t* uid, uint16_t target_room) {
+  uint16_t room_number;
+  char msg[80];
+  
+  if (Nav_ReadRoomNumber(uid, &room_number) == MI_OK) {
+    sprintf(msg, "Card room number: %d, Target: %d\r\n", room_number, target_room);
+    UART_Send_String(msg);
+    
+    // 保存房间号到LCD显示变量
+    lcd_room_number = room_number;
+    lcd_room_valid = 1;
+    
+    if (room_number == target_room) {
+      return 1;  // 到达目标房间
+    }
+  }
+  return 0;  // 未到达
 }
 
 // 根据目标房间查询转向方向
@@ -152,15 +228,7 @@ void Nav_ProcessJunction(uint8_t* uid) {
   
   UART_Send_String("==========================\r\n");
   
-  // 检测是否到达目标房间（特殊处理：目标房间数据存在说明到达）
-  if (nav_state == NAV_GO_TO_ROOM && dir != DIR_UNKNOWN) {
-    // 检查是否到达目标房间（简化：检测到有效方向后假设到达目标区域）
-    // 实际应用中可能需要单独的房间卡片
-    UART_Send_String("\n=== Arrived at Destination ===\r\n");
-    sprintf(msg, "Reached Room %d!\r\n", target_room);
-    UART_Send_String(msg);
-    UART_Send_String("Auto-return to START POINT...\r\n");
-    UART_Send_String("==========================\r\n");
-    nav_state = NAV_RETURN_TO_START;  // 切换到返回起点状态
-  }
+  // 设置导航方向指令，通知巡线任务执行转向
+  nav_direction = dir;
+  nav_ready = 1;
 }

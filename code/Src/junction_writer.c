@@ -11,8 +11,8 @@ uint8_t WriteJunctionBlock(uint8_t* uid, uint8_t* block_data) {
   uint8_t i;
   uint8_t tmp_uid[5];
   
-  // 重新唤醒卡片（因为之前的Check函数调用了Halt）
-  status = MFRC522_Request(PICC_REQIDL, tmp_uid);
+  // 重新唤醒卡片（使用WUPA，可唤醒被Halt休眠的卡片）
+  status = MFRC522_Request(PICC_REQALL, tmp_uid);
   if (status != MI_OK) {
     UART_Send_String("Request failed!\r\n");
     return status;
