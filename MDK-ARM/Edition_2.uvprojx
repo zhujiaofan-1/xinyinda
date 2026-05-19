@@ -899,6 +899,11 @@
               <FileType>5</FileType>
               <FilePath>..\code\Inc\Turn.h</FilePath>
             </File>
+            <File>
+              <FileName>bluetooth.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\Inc\bluetooth.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -973,6 +978,11 @@
               <FileName>Turn.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\code\Src\Turn.c</FilePath>
+            </File>
+            <File>
+              <FileName>bluetooth.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\Src\bluetooth.c</FilePath>
             </File>
           </Files>
         </Group>

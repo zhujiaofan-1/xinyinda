@@ -28,6 +28,7 @@
 #include "Headfile.h"
 #include "usart.h"
 #include "Mytask.h"
+#include "bluetooth.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -139,6 +140,7 @@ void MX_FREERTOS_Init(void) {
   osThreadNew(irtracking_Task, NULL, &irtrackingTask_attributes);
   osThreadNew(Avoidance_Task, NULL, &avoidanceTask_attributes);
   su03t_Init();
+  Bluetooth_Init();
   
 
   /* USER CODE END RTOS_THREADS */

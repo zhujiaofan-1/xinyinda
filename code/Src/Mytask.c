@@ -22,7 +22,7 @@ enum {
     AVOID_TRANSLATE_BACK   // 平移回线上
 };
 
-#define TRANSLATE_ENCODER_TARGET 200  // 平移出线的编码器目标值，需根据实际调整
+int16_t g_translate_encoder_target = 200;  // 平移出线的编码器目标值，需根据实际调整
 #define FORWARD_EXTRA_ENCODER    11   // 走过障碍物后额外前进的编码器值
 #define OBSTACLE_DISTANCE        20   // 障碍物判定距离(cm)
 
@@ -99,7 +99,7 @@ void Avoidance_Task(void* param)
                 avg_enc = (abs(encoder.encoder_m1) + abs(encoder.encoder_m2)
                          + abs(encoder.encoder_m3) + abs(encoder.encoder_m4)) / 4;
 
-                if(avg_enc >= TRANSLATE_ENCODER_TARGET)         //平移出线的编码值大于目标值，说明已平移完成
+                if(avg_enc >= g_translate_encoder_target)         //平移出线的编码值大于目标值，说明已平移完成
                 {
                     // 记录平移编码器值，回线时使用相同值精确返回
                     translate_encoder = avg_enc;
@@ -296,7 +296,7 @@ void car_walking(void *param)
                   avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
                            + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
                   vTaskDelay(pdMS_TO_TICKS(10));
-                } while(avg_enc < TURN_ENCODER_90);
+                } while(avg_enc < g_turn_encoder_90);
                 break;
               case TURN_RIGHT:
                 Motion_Ctrl(0, 0, 60, 0);
@@ -305,7 +305,7 @@ void car_walking(void *param)
                   avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
                            + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
                   vTaskDelay(pdMS_TO_TICKS(10));
-                } while(avg_enc < TURN_ENCODER_90);
+                } while(avg_enc < g_turn_encoder_90);
                 break;
               case TURN_UTURN:
                 Motion_Ctrl(0, 0, -60, 0);
@@ -314,7 +314,7 @@ void car_walking(void *param)
                   avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
                            + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
                   vTaskDelay(pdMS_TO_TICKS(10));
-                } while(avg_enc < TURN_ENCODER_180);
+                } while(avg_enc < g_turn_encoder_180);
                 break;
             }
 
@@ -355,7 +355,7 @@ void car_walking(void *param)
               avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
                        + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
               vTaskDelay(pdMS_TO_TICKS(10));
-            } while(avg_enc < TURN_ENCODER_180);
+            } while(avg_enc < g_turn_encoder_180);
             Motion_Ctrl(0, 0, 0, 0);
             xSemaphoreGive(xAvoidSemaphore);
           }

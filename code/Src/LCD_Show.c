@@ -133,6 +133,12 @@ void LCD_Show_Task(void* param)
                 default:            LCD_DisplayText(10, 180, "Dir:Unknown     "); break;
             }
         }
+
+
+        //显示蓝牙信息
+        extern char BT_Packet_buf[BT_RECV_LEN];
+        snprintf(Text, sizeof(Text), "BT:%d          ", g_turn_encoder_90);
+        LCD_DisplayText(10, 200, Text);
         
         vTaskDelay(pdMS_TO_TICKS(500));
     }

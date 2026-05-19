@@ -2,6 +2,10 @@
 #include "Headfile.h"
 #include "Turn.h"
 
+int16_t g_turn_encoder_90 = 20;
+int16_t g_turn_encoder_180 = 40;
+int16_t g_turn_encoder_straight = 50;
+
 /**
  * @brief  读取红外巡线模块8个传感器状态
  * @param  s1-s8: 8个传感器状态指针，0表示黑线，1表示白底

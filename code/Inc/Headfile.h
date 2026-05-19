@@ -35,6 +35,7 @@
 #include "Servo.h"
 #include "irtracking.h"
 #include "rc522.h"
+#include "bluetooth.h"
 
 #include "su_03t.h"
 #include "Turn.h"
