@@ -5,9 +5,6 @@
 
 SemaphoreHandle_t xAvoidSemaphore = NULL;
 
-// 系统模式：0=写卡模式，1=导航模式
-volatile uint8_t system_mode = 1;  // 默认导航模式
-
 void Avoidance_Semaphore_Init(void)
 {
     xAvoidSemaphore = xSemaphoreCreateBinary();
@@ -41,13 +38,13 @@ void Avoidance_Task(void* param)
 
     while(1)
     {
+        distance = HCSR04_Get_Distance();
+        g_ultrasonic_distance = distance;
+
         if(nav_state != NAV_GOING && nav_state != NAV_RETURNING) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
-
-        distance = HCSR04_Get_Distance();
-        g_ultrasonic_distance = distance;
 
         switch(avoid_state)
         {
@@ -214,9 +211,7 @@ void car_walking(void *param)
   motor_encoder_t enc;
   int32_t avg_enc;
   
-  xNavSemaphore = xSemaphoreCreateBinary();
-  
-  Turn_Init(DIR_S, 0);
+  Turn_Init(DIR_S, 3);
   nav_state = NAV_IDLE;
   
   while(1)
@@ -276,21 +271,60 @@ void car_walking(void *param)
 
     // 尝试解析为路口卡(N34S0W2E15格式)
     if (Turn_ParseData(block_data, turn_info, &turn_count) == MI_OK) {
+      if (nav_state == NAV_IDLE) {
+        nav_state = NAV_GOING;
+      }
+
       if (turn_target_room == 0) {
-        // 返航模式：计算返回南方的转向
         turn_action = Turn_CalculateReturn(turn_current_dir);
       } else {
-        // 正常导航：根据目标房间计算转向
         turn_action = Turn_CalculateTurn(turn_current_dir, turn_target_room, turn_info, turn_count);
       }
       turn_action_valid = 1;
 
-      if (turn_action != TURN_ERROR) {
-        turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
-      }
-      if(xNavSemaphore != NULL) {
-        xSemaphoreGive(xNavSemaphore);
-      }
+        if (turn_action != TURN_ERROR && turn_action != TURN_STRAIGHT) {
+          if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(2000)) == pdPASS) {
+            Motion_Ctrl(0, 0, 0, 0);
+            Motor_Reset_Encoder();
+
+            switch(turn_action)
+            {
+              case TURN_LEFT:
+                Motion_Ctrl(0, 0, -60, 0);
+                do {
+                  Motor_Get_Encoder(&enc);
+                  avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
+                           + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+                  vTaskDelay(pdMS_TO_TICKS(10));
+                } while(avg_enc < TURN_ENCODER_90);
+                break;
+              case TURN_RIGHT:
+                Motion_Ctrl(0, 0, 60, 0);
+                do {
+                  Motor_Get_Encoder(&enc);
+                  avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
+                           + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+                  vTaskDelay(pdMS_TO_TICKS(10));
+                } while(avg_enc < TURN_ENCODER_90);
+                break;
+              case TURN_UTURN:
+                Motion_Ctrl(0, 0, -60, 0);
+                do {
+                  Motor_Get_Encoder(&enc);
+                  avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
+                           + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
+                  vTaskDelay(pdMS_TO_TICKS(10));
+                } while(avg_enc < TURN_ENCODER_180);
+                break;
+            }
+
+            Motion_Ctrl(0, 0, 0, 0);
+            turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
+            xSemaphoreGive(xAvoidSemaphore);
+          }
+        } else if(turn_action == TURN_STRAIGHT) {
+          turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
+        }
     } else {
       // 非路口卡，检查是否为房间卡(纯数字)
       is_room_card = 1;
@@ -342,7 +376,7 @@ void car_walking(void *param)
     MFRC522_ClearBitMask(MFRC522_REG_STATUS2, 0x08);
     MFRC522_SetBitMask(MFRC522_REG_FIFO_LEVEL, 0x80);
     
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(200));
   }
 }
 

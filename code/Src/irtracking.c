@@ -61,12 +61,6 @@ int pid_output_IRR = 0;
 #define IRR_SPEED 			  80   // 巡线速度（范围-100~+100）
 #define IRTrack_Minddle    0    // 中间的目标值
 
-// 十字路口状态机：0=未检测, 1=已检测正在直行, 2=停车读卡
-uint8_t crossroad_state = 0;
-
-// 十字路口直行目标编码器值（根据实际距离调整）
-#define CROSSROAD_ENCODER_TARGET 500
-
 /**
  * @brief  位置式PID计算巡线偏差
  * @param  actual_value: 当前传感器偏差值
@@ -105,114 +99,9 @@ float APP_ELE_PID_Calc(int8_t actual_value)
 //x1-x8 从左往右数
 uint8_t LineWalking(void)
 {
-	static int8_t err = 0;  // 保存当前偏差值，用于PID计算
-	static uint8_t x1,x2,x3,x4,x5,x6,x7,x8;  // 8个传感器状态变量
-	motor_encoder_t encoder;  // 编码器值
-	// 读取8个传感器状态：0表示黑线，1表示白底
+	static int8_t err = 0;
+	static uint8_t x1,x2,x3,x4,x5,x6,x7,x8;
 	irtacking_Read(&x1,&x2,&x3,&x4,&x5,&x6,&x7,&x8);
-	//debug
-	//printf("%d\t %d\t %d\t %d\t %d\t %d\t %d\t %d\t \r\n",x1,x2,x3,x4,x5,x6,x7,x8);
-
-	// 十字路口状态机
-	if(crossroad_state == 0)
-	{
-		// 状态0：正常巡线，检测十字路口
-		// 十字路口特征：x1和x8（最外侧）同时检测到黑线
-		if(x1 == 0 && x8 == 0)
-		{
-			crossroad_state = 1;  // 进入状态1：直行对准RFID
-			Motor_Reset_Encoder();  // 重置编码器
-			Motion_Ctrl(60, 0, 0, 0);  // 直行
-			return 1;  // 返回1表示检测到十字路口
-		}
-	}
-	else if(crossroad_state == 1)
-	{
-		// 状态1：直行中，检查编码器值
-		Motor_Get_Encoder(&encoder);
-		// 取4个电机编码器平均值，用绝对值防止负数
-		int32_t avg_encoder = (abs(encoder.encoder_m1) + abs(encoder.encoder_m2) 
-		                     + abs(encoder.encoder_m3) + abs(encoder.encoder_m4)) / 4;
-		if(avg_encoder >= CROSSROAD_ENCODER_TARGET)  // 达到目标距离
-		{
-			Motion_Ctrl(0, 0, 0, 0);  // 停车
-			crossroad_state = 2;  // 进入状态2：停车读卡
-			return 1;
-		}
-		else
-		{
-			// 继续直行，同时用中间传感器做微调防止偏离黑线
-			int8_t cross_err = 0;
-			if(x4 == 0 && x5 == 1) cross_err = -2;       // 偏左
-			else if(x4 == 1 && x5 == 0) cross_err = 2;   // 偏右
-			else if(x4 == 0 && x5 == 0) cross_err = 0;   // 居中
-			Motion_Ctrl(60, 0, cross_err * 3, 0);
-			return 1;
-		}
-	}
-	else if(crossroad_state == 2)
-	{
-		// 状态2：停车读卡完成，等待Turn模块导航指令
-		if(turn_action_valid && xSemaphoreTake(xNavSemaphore, pdMS_TO_TICKS(100)) == pdPASS)
-		{
-			motor_encoder_t enc;
-			int32_t avg_enc;
-			
-			Motor_Reset_Encoder();
-			
-			// 根据Turn模块计算的转向动作执行转向
-			switch(turn_action)
-			{
-				case TURN_STRAIGHT:
-					Motion_Ctrl(60, 0, 0, 0);
-					do {
-						Motor_Get_Encoder(&enc);
-						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
-						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-						vTaskDelay(pdMS_TO_TICKS(10));
-					} while(avg_enc < TURN_ENCODER_STRAIGHT);
-					break;
-					
-				case TURN_LEFT:
-					Motion_Ctrl(0, 0, -60, 0);
-					do {
-						Motor_Get_Encoder(&enc);
-						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
-						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-						vTaskDelay(pdMS_TO_TICKS(10));
-					} while(avg_enc < TURN_ENCODER_90);
-					break;
-					
-				case TURN_RIGHT:
-					Motion_Ctrl(0, 0, 60, 0);
-					do {
-						Motor_Get_Encoder(&enc);
-						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
-						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-						vTaskDelay(pdMS_TO_TICKS(10));
-					} while(avg_enc < TURN_ENCODER_90);
-					break;
-					
-				case TURN_UTURN:
-					Motion_Ctrl(0, 0, -60, 0);
-					do {
-						Motor_Get_Encoder(&enc);
-						avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2) 
-						         + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-						vTaskDelay(pdMS_TO_TICKS(10));
-					} while(avg_enc < TURN_ENCODER_180);
-					break;
-					
-				default:
-					break;
-			}
-			
-			Motion_Ctrl(0, 0, 0, 0);
-			turn_action_valid = 0;
-			Clear_Crossroad_Flag();
-		}
-		return 1;
-	}
 
 	// 优先判断特殊路况
 	// 情况1：x1、x3、x4、x5、x8都在黑线上，说明车身居中，偏差为0
@@ -293,14 +182,4 @@ uint8_t LineWalking(void)
 	Motion_Ctrl(IRR_SPEED, 0, pid_output_IRR, 0);
 
 	return 0;
-}
-
-/**
- * @brief  清除十字路口标志，恢复正常巡线
- * @param  无
- * @retval 无
- */
-void Clear_Crossroad_Flag(void)
-{
-	crossroad_state = 0;  // 重置为状态0，恢复正常巡线
 }

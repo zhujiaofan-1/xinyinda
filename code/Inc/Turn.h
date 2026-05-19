@@ -2,7 +2,6 @@
 #define __TURN_H__
 
 #include "stdint.h"
-#include "semphr.h"
 
 // 方向定义
 #define DIR_N  0x01  // 北
@@ -38,7 +37,6 @@ extern volatile uint8_t turn_action;         // 计算出的转向动作
 extern volatile uint8_t turn_action_valid;   // 转向动作有效标志
 extern volatile char turn_card_content[17];  // 卡片内容字符串
 extern volatile uint8_t nav_state;           // 导航状态
-extern SemaphoreHandle_t xNavSemaphore;      // 导航同步信号量
 
 void Turn_GoRoom(uint16_t room);
 

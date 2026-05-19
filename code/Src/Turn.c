@@ -11,7 +11,6 @@ volatile uint8_t turn_action = TURN_ERROR;     // 转向动作
 volatile uint8_t turn_action_valid = 0;        // 转向动作有效标志
 volatile char turn_card_content[17] = {0};     // 卡片内容字符串
 volatile uint8_t nav_state = NAV_IDLE;         // 导航状态
-SemaphoreHandle_t xNavSemaphore = NULL;        // 导航同步信号量
 
 
 

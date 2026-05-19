@@ -22,9 +22,6 @@
 
 /* USER CODE BEGIN 0 */
 
-// External reference to system mode from Mytask.c
-extern volatile uint8_t system_mode;
-
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart2;

@@ -7,8 +7,6 @@
 #include "Turn.h"
 #include "usart.h"
 
-extern volatile uint8_t system_mode;
-
 #define UART2_RECV_LEN          5
 
 TaskHandle_t xUART2_Recv_Task_Handle; // UART2接收任务句柄
@@ -48,20 +46,16 @@ void Process_UART2_Recv_Data(uint8_t* data)
 {
     uint16_t new_room = 0;
 
-    if (data[0] == 'w' || data[0] == 'W') {
-        system_mode = 0;
-        UART_Send_String("\r\nSwitched to WRITE MODE\r\n");
-        return;
-    } else if (data[0] == 'n' || data[0] == 'N') {
-        system_mode = 1;
-        UART_Send_String("\r\nSwitched to NAVIGATION MODE\r\n");
-        return;
-    } else if (data[0] == 'h' || data[0] == 'H') {
-        UART_Send_String("\r\n=== Help ===\r\n");
-        UART_Send_String("w - Switch to Write Mode\r\n");
-        UART_Send_String("n - Switch to Navigation Mode\r\n");
-        UART_Send_String("h - Show this help\r\n");
-        UART_Send_String("============\r\n");
+    if (data[0] >= '0' && data[0] <= '5') {
+        new_room = data[0] - '0';
+        Turn_GoRoom(new_room);
+        if(new_room == 0) {
+            UART_Send_String("\r\nGo to room: RETURN HOME\r\n");
+        } else {
+            char msg[] = "\r\nGo to room: X\r\n";
+            msg[13] = data[0];
+            UART_Send_String(msg);
+        }
         return;
     }
 
