@@ -29,23 +29,25 @@ void LCD_Show_Task(void* param)
     
     LCD_Show_Init();
     char Text[20];
-    
+
     volatile uint16_t V = 0;
-    
+
     motor_encoder_t Encoder;
-    
+
     while (1)
     {
-        
+        // 获取编码器数据并显示
         Motor_Get_Encoder(&Encoder);
-        
+
         snprintf(Text, sizeof(Text), "Encoder = %d        ", Encoder.encoder_m1);
         LCD_DisplayText(10, 20, Text);
 
+        // 获取电池电压并显示
         V = Motor_Get_Vol();
 		snprintf(Text, sizeof(Text), "V = %dmV       ", V);
         LCD_DisplayText(10, 40, Text);
 
+        // 显示超声波测距值
         snprintf(Text, sizeof(Text), "Distance = %.2f      ", g_ultrasonic_distance);
         LCD_DisplayText(10, 60, Text);
 
@@ -135,9 +137,9 @@ void LCD_Show_Task(void* param)
         }
 
 
-        //显示蓝牙信息
-        extern char BT_Packet_buf[BT_RECV_LEN];
-        snprintf(Text, sizeof(Text), "BT:%d          ", g_turn_encoder_90);
+        // 显示SU03T语音接收数据
+        snprintf(Text, sizeof(Text), "SU03T:%02X %02X %02X    ",
+                 g_su03t_recv_data[0], g_su03t_recv_data[1], g_su03t_recv_data[2]);
         LCD_DisplayText(10, 200, Text);
         
         vTaskDelay(pdMS_TO_TICKS(500));

@@ -10,6 +10,8 @@ void su03t_Send_Task(void *pvParameters);
 void su03t_Receive_Task(void *pvParameters);
 void Process_UART2_Recv_Data(uint8_t* data);
 
+extern uint8_t g_su03t_recv_data[5];
+
 extern TaskHandle_t xUART2_Recv_Task_Handle;
 
 #endif

@@ -4,12 +4,17 @@
 
 SemaphoreHandle_t xMotorMutex = NULL;
 
+/**
+ * @brief  设置四个电机的速度
+ * @param  speed: 包含四个电机速度值的结构体
+ * @retval 无
+ */
 void Motor_Set_Speed(motor_speed_t speed)
 {
     int8_t Speed_buf[4] = {speed.speed_m1, speed.speed_m2, speed.speed_m3, speed.speed_m4};
-    if(xMotorMutex != NULL) xSemaphoreTake(xMotorMutex, portMAX_DELAY);
+    if(xMotorMutex != NULL) xSemaphoreTake(xMotorMutex, portMAX_DELAY);  // 获取互斥锁
     I2C_Write_Len(MOTOR_FIXED_SPEED_ADDR,Speed_buf,4);
-    if(xMotorMutex != NULL) xSemaphoreGive(xMotorMutex);
+    if(xMotorMutex != NULL) xSemaphoreGive(xMotorMutex);  // 释放互斥锁
 }
 
 /**
@@ -44,7 +49,7 @@ uint16_t Motor_Get_Vol(void)
         if(xMotorMutex != NULL) xSemaphoreGive(xMotorMutex);
         return 0;
     }
-    result = (data[0]|(data[1]<<8));
+    result = (data[0]|(data[1]<<8));  // 拼接高低字节为电压值
     if(xMotorMutex != NULL) xSemaphoreGive(xMotorMutex);
     return result;
 }
@@ -60,6 +65,7 @@ void Motor_Get_Encoder(motor_encoder_t* Encoder)
     if(xMotorMutex != NULL) xSemaphoreTake(xMotorMutex, portMAX_DELAY);
     I2C_Read_Len(MOTOR_ENCODER_TOTAL_ADDR,buf,16);
 
+    // 将4字节小端数据拼接为32位有符号编码器值
     Encoder->encoder_m1 = (int32_t)(buf[0] | (buf[1]<<8) | (buf[2]<<16) | (buf[3]<<24));
     Encoder->encoder_m2 = (int32_t)(buf[4] | (buf[5]<<8) | (buf[6]<<16) | (buf[7]<<24));
     Encoder->encoder_m3 = (int32_t)(buf[8] | (buf[9]<<8) | (buf[10]<<16) | (buf[11]<<24));
@@ -82,27 +88,33 @@ void Motor_Reset_Encoder(void)
 
 
 
-// 麦克纳姆轮运动控制
-// Vx: 前进速度, Vy: 横移速度, W: 旋转量, Vz: 附加速度
+/**
+ * @brief  麦克纳姆轮运动控制，根据速度分量计算各轮速度
+ * @param  Vx: 前进速度
+ * @param  Vy: 横移速度
+ * @param  W:  旋转量
+ * @param  Vz: 附加速度
+ * @retval 无
+ */
 void Motion_Ctrl(int Vx, int Vy, int W, int Vz)
 {
     motor_speed_t speed;
     int temp;
-    
+
     // 麦克纳姆轮逆运动学公式
     // m1(右前)  m2(左前)
     // m3(右后)  m4(左后)
     temp = -W + Vy + Vx;
-    speed.speed_m1 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);  // 右前
-    
+    speed.speed_m1 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);  // 限幅 [-100, 100]
+
     temp = W + Vy + Vx;
-    speed.speed_m2 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);  // 左前
-    
+    speed.speed_m2 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);
+
     temp = -W - Vy + Vx;
-    speed.speed_m3 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);  // 右后
-    
+    speed.speed_m3 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);
+
     temp = W - Vy + Vx;
-    speed.speed_m4 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);  // 左后
-    
+    speed.speed_m4 = (temp > 100) ? 100 : ((temp < -100) ? -100 : temp);
+
     Motor_Set_Speed(speed);
 }

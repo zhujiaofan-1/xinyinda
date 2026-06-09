@@ -14,13 +14,18 @@ volatile uint8_t nav_state = NAV_IDLE;         // 导航状态
 
 
 
+/**
+ * @brief  设置目标房间并切换导航状态
+ * @param  room: 目标房间号，0表示返航
+ * @retval 无
+ */
 void Turn_GoRoom(uint16_t room)
 {
-    turn_target_room = room;  
+    turn_target_room = room;
     if (room != 0) {
-        nav_state = NAV_GOING;
+        nav_state = NAV_GOING;      // 前往目标房间
     } else {
-        nav_state = NAV_RETURNING;
+        nav_state = NAV_RETURNING;  // 房间号为0，进入返航模式
     }
 }
 
@@ -45,9 +50,9 @@ void Turn_Init(uint8_t init_dir, uint16_t target_room) {
 uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
   switch (action) {
     case TURN_STRAIGHT:
-      return current_dir;
+      return current_dir;            // 直行方向不变
     case TURN_LEFT:
-      switch (current_dir) {
+      switch (current_dir) {         // 左转：逆时针旋转90°
         case DIR_N: return DIR_W;
         case DIR_W: return DIR_S;
         case DIR_S: return DIR_E;
@@ -55,7 +60,7 @@ uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
         default: return current_dir;
       }
     case TURN_RIGHT:
-      switch (current_dir) {
+      switch (current_dir) {         // 右转：顺时针旋转90°
         case DIR_N: return DIR_E;
         case DIR_E: return DIR_S;
         case DIR_S: return DIR_W;
@@ -63,7 +68,7 @@ uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
         default: return current_dir;
       }
     case TURN_UTURN:
-      switch (current_dir) {
+      switch (current_dir) {         // 掉头：旋转180°
         case DIR_N: return DIR_S;
         case DIR_S: return DIR_N;
         case DIR_W: return DIR_E;
@@ -83,9 +88,9 @@ uint8_t Turn_UpdateDirection(uint8_t current_dir, uint8_t action) {
 uint8_t Turn_CalculateReturn(uint8_t current_dir) {
   switch (current_dir) {
     case DIR_S: return TURN_UTURN;      // 从南方来(朝北走)，掉头回南
-    case DIR_N: return TURN_STRAIGHT;    // 从北方来(朝南走)，直行
-    case DIR_W: return TURN_RIGHT;       // 从西方来(朝东走)，右转朝南
-    case DIR_E: return TURN_LEFT;        // 从东方来(朝西走)，左转朝南
+    case DIR_N: return TURN_STRAIGHT;    // 从北方来(朝南走)，直行回南
+    case DIR_W: return TURN_RIGHT;       // 从西方来(朝东走)，右转朝南 (RIGHT: W→N, 面朝S ✓)
+    case DIR_E: return TURN_LEFT;        // 从东方来(朝西走)，左转朝南 (LEFT: E→N, 面朝S ✓)
     default: return TURN_ERROR;
   }
 }
@@ -119,7 +124,7 @@ uint8_t Turn_ReadCardData(uint8_t* uid, uint8_t* block_data) {
   for (i = 0; i < 4; i++) {
     uid_full[i] = tmp_uid[i];
   }
-  uid_full[4] = tmp_uid[0] ^ tmp_uid[1] ^ tmp_uid[2] ^ tmp_uid[3];
+  uid_full[4] = tmp_uid[0] ^ tmp_uid[1] ^ tmp_uid[2] ^ tmp_uid[3];  // 异或校验位
   
   // 选择卡片
   if (MFRC522_SelectTag(uid_full) == 0) {
@@ -228,15 +233,18 @@ uint8_t Turn_CalculateTurn(uint8_t current_dir, uint8_t target_room, TurnInfo_t*
     return TURN_STRAIGHT;
   }
   
-  // 顺时针方向，左转（N→E→S→W→N）
+  // 左转判断：转向后current_dir更新，使得面朝方向=target_dir
+  // 面朝方向 = opposite(current_dir)，TURN_LEFT后 current_dir 逆时针旋转
+  // 例如：current_dir=DIR_S(面朝北), target_dir=DIR_W(朝西走=左转)
+  //       TURN_LEFT后 DIR_S→DIR_E(面朝西=target_dir ✓)
   if ((current_dir == DIR_N && target_dir == DIR_E) ||
       (current_dir == DIR_E && target_dir == DIR_S) ||
       (current_dir == DIR_S && target_dir == DIR_W) ||
       (current_dir == DIR_W && target_dir == DIR_N)) {
     return TURN_LEFT;
   }
-  
-  // 其他情况，右转
+
+  // 右转
   return TURN_RIGHT;
 }
 

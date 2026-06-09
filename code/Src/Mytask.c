@@ -5,187 +5,213 @@
 
 SemaphoreHandle_t xAvoidSemaphore = NULL;
 
+/**
+ * @brief  初始化避障信号量，初始状态为可用
+ */
 void Avoidance_Semaphore_Init(void)
 {
     xAvoidSemaphore = xSemaphoreCreateBinary();
-    xSemaphoreGive(xAvoidSemaphore);
+    xSemaphoreGive(xAvoidSemaphore);  // 初始释放，允许巡线任务运行
 }
 
 // 避障状态机
 enum {
     AVOID_NORMAL = 0,      // 正常巡线
+    AVOID_CHECK_FRONT,     // 检测前方距离
     AVOID_CHECK_LEFT,      // 检测左边距离
     AVOID_CHECK_RIGHT,     // 检测右边距离
+    AVOID_DECIDE,          // 三个方向测完，判断方向
     AVOID_TRANSLATE_OUT,   // 平移出线
     AVOID_FORWARD,         // 向前走绕过障碍物
-    AVOID_FORWARD_EXTRA,   // 再向前走11个编码器值
-    AVOID_TRANSLATE_BACK   // 平移回线上
+    AVOID_TRANSLATE_BACK,  // 平移回线上
+    AVOID_ABORT            // RFID转向中止避障
 };
 
-int16_t g_translate_encoder_target = 200;  // 平移出线的编码器目标值，需根据实际调整
-#define FORWARD_EXTRA_ENCODER    11   // 走过障碍物后额外前进的编码器值
-#define OBSTACLE_DISTANCE        20   // 障碍物判定距离(cm)
+int16_t g_translate_encoder_target = 1000;  // 平移出/入线的编码器目标值
+int16_t g_forward_encoder = 4000;           // 避障前进的编码器值，可通过蓝牙调参
+int16_t g_obstacle_distance = 40;   // 障碍物判定距离(cm)
 
+/**
+ * @brief  避障任务，基于超声波测距的状态机实现绕障逻辑
+ * @param  param FreeRTOS任务参数（未使用）
+ * @retval 无
+ */
 void Avoidance_Task(void* param)
 {
     static float distance;
     static uint8_t avoid_state = AVOID_NORMAL;
-    static float left_dist = 0, right_dist = 0;
-    static int32_t translate_encoder = 0;  // 记录平移出线时的编码器值，用于回线时精确返回
-    static uint8_t obstacle_side = 0;      // 0=障碍物在左边(向右平移避障)，1=障碍物在右边(向左平移避障)
+    static float front_dist = 0, left_dist = 0, right_dist = 0;
+    static uint8_t obstacle_side = 0;  // 0=右侧空间大(向右平移), 1=左侧空间大(向左平移)
     static motor_encoder_t encoder;
     static int32_t avg_enc;
 
     while(1)
     {
+        HCSR04_Trigger();  // 触发超声波测距
+        vTaskDelay(pdMS_TO_TICKS(100));
         distance = HCSR04_Get_Distance();
         g_ultrasonic_distance = distance;
 
+        // RFID转向优先：如果nav_state变为NAV_IDLE（RFID识别停车），中止避障
+        if(nav_state == NAV_IDLE && avoid_state != AVOID_NORMAL)
+        {
+            avoid_state = AVOID_ABORT;
+        }
+
         if(nav_state != NAV_GOING && nav_state != NAV_RETURNING) {
             vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
+            continue;  // 非导航状态，跳过避障处理
         }
 
         switch(avoid_state)
         {
             case AVOID_NORMAL:
-                if(distance < OBSTACLE_DISTANCE && distance > 0)
+                if(distance < g_obstacle_distance && distance > 0)
                 {
-                    // 检测到前方障碍物，暂停巡线
-                    xSemaphoreTake(xAvoidSemaphore, portMAX_DELAY);
-                    Motion_Ctrl(0, 0, 0, 0);
-                    // 舵机转左，准备检测左边距离
-                    Servo_SetAngle(0);
-                    vTaskDelay(pdMS_TO_TICKS(500));
-                    avoid_state = AVOID_CHECK_LEFT;
+                    xSemaphoreTake(xAvoidSemaphore, portMAX_DELAY);  // 获取信号量，阻止巡线
+                    if(nav_state != NAV_GOING && nav_state != NAV_RETURNING) {
+                        xSemaphoreGive(xAvoidSemaphore);
+                        break;
+                    }
+                    Motion_Ctrl(0, 0, 0, 0);  // 停车
+                    Servo_SetAngle(90);  // 舵机回正，准备测前方距离
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    avoid_state = AVOID_CHECK_FRONT;
                 }
+                break;
+
+            case AVOID_CHECK_FRONT:
+                front_dist = distance;
+                Servo_SetAngle(0);   // 舵机转左，测左方距离
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                avoid_state = AVOID_CHECK_LEFT;
                 break;
 
             case AVOID_CHECK_LEFT:
                 left_dist = distance;
-                // 舵机转右，准备检测右边距离
-                Servo_SetAngle(180);
-                vTaskDelay(pdMS_TO_TICKS(500));
+                Servo_SetAngle(180);  // 舵机转右，测右方距离
+                vTaskDelay(pdMS_TO_TICKS(1000));
                 avoid_state = AVOID_CHECK_RIGHT;
                 break;
 
             case AVOID_CHECK_RIGHT:
                 right_dist = distance;
-                Motor_Reset_Encoder();
+                Servo_SetAngle(90);   // 舵机回正
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                avoid_state = AVOID_DECIDE;
+                break;
 
-                // 根据左右距离选择平移方向：哪边距离远就往哪边平移
-                if(left_dist > right_dist && left_dist > OBSTACLE_DISTANCE)
+            case AVOID_DECIDE:
+                // 三方围堵，无法绕行
+                if(front_dist < g_obstacle_distance && left_dist < g_obstacle_distance && right_dist < g_obstacle_distance)
                 {
-                    obstacle_side = 1;  // 障碍物在右边，向左平移
-                    Motion_Ctrl(0, 60, 0, 0);
+                    Motion_Ctrl(0, 0, 0, 0);  // 三方围堵，无法绕行，停车
+                    avoid_state = AVOID_NORMAL;
+                    xSemaphoreGive(xAvoidSemaphore);
+                    break;
                 }
-                else if(right_dist > OBSTACLE_DISTANCE)
+
+                Motor_Reset_Encoder();  // 重置编码器，用于平移距离计数
+
+                // 选择空间更大的一侧平移
+                if(left_dist > right_dist && left_dist > g_obstacle_distance)
                 {
-                    obstacle_side = 0;  // 障碍物在左边，向右平移
-                    Motion_Ctrl(0, -60, 0, 0);
+                    obstacle_side = 1;  // 左侧空间大，向左平移
+                    Motion_Ctrl(0, 60, 0, 0);
                 }
                 else
                 {
-                    // 两边都有障碍物，默认向左平移
-                    obstacle_side = 1;
-                    Motion_Ctrl(0, 60, 0, 0);
+                    obstacle_side = 0;  // 右侧空间大，向右平移
+                    Motion_Ctrl(0, -60, 0, 0);
                 }
                 avoid_state = AVOID_TRANSLATE_OUT;
                 break;
 
-            case AVOID_TRANSLATE_OUT:               //平移出线
+            case AVOID_TRANSLATE_OUT:
                 Motor_Get_Encoder(&encoder);
-                // 计算平均编码器值，取绝对值
                 avg_enc = (abs(encoder.encoder_m1) + abs(encoder.encoder_m2)
-                         + abs(encoder.encoder_m3) + abs(encoder.encoder_m4)) / 4;
+                         + abs(encoder.encoder_m3) + abs(encoder.encoder_m4)) / 4;  // 四轮平均编码器值
 
-                if(avg_enc >= g_translate_encoder_target)         //平移出线的编码值大于目标值，说明已平移完成
+                if(avg_enc >= g_translate_encoder_target)  // 平移到位
                 {
-                    // 记录平移编码器值，回线时使用相同值精确返回
-                    translate_encoder = avg_enc;
-                    Motion_Ctrl(0, 0, 0, 0);                    // 停车
+                    Motion_Ctrl(0, 0, 0, 0);
                     Motor_Reset_Encoder();
-
-                    // 舵机转向障碍物那侧，监测是否已走过障碍物
-                    if(obstacle_side == 0)
-                        Servo_SetAngle(0);      // 障碍物在左边，舵机转左监测
-                    else
-                        Servo_SetAngle(180);    // 障碍物在右边，舵机转右监测
-                    vTaskDelay(pdMS_TO_TICKS(500));
-
-                    Motion_Ctrl(50, 0, 0, 0);       //向前走
+                    Motion_Ctrl(50, 0, 0, 0);
                     avoid_state = AVOID_FORWARD;
                 }
                 break;
 
-            case AVOID_FORWARD:               //向前走
-                // 舵机监测障碍物侧，距离>20cm说明已走过障碍物
-                if(distance > OBSTACLE_DISTANCE || distance < 0)
-                {
-                    Motor_Reset_Encoder();
-                    Motion_Ctrl(50, 0, 0, 0);
-                    avoid_state = AVOID_FORWARD_EXTRA;
-                }
-                break;
-
-            case AVOID_FORWARD_EXTRA:           // 过了障碍物，向前走额外距离
+            case AVOID_FORWARD:
                 Motor_Get_Encoder(&encoder);
                 avg_enc = (abs(encoder.encoder_m1) + abs(encoder.encoder_m2)
                          + abs(encoder.encoder_m3) + abs(encoder.encoder_m4)) / 4;
 
-                if(avg_enc >= FORWARD_EXTRA_ENCODER)         // 前向走额外距离的编码值大于目标值，说明已走完额外距离
+                if(avg_enc >= g_forward_encoder)  // 前进到位
                 {
-                    Motion_Ctrl(0, 0, 0, 0);   
+                    Motion_Ctrl(0, 0, 0, 0);
                     Motor_Reset_Encoder();
 
-                    // 反向平移回线上（与出线方向相反）
+                    // 反方向平移回线
                     if(obstacle_side == 0)
-                        Motion_Ctrl(0, 60, 0, 0);   // 之前向右出线，现在向左回线
+                        Motion_Ctrl(0, 60, 0, 0);
                     else
-                        Motion_Ctrl(0, -60, 0, 0);  // 之前向左出线，现在向右回线
+                        Motion_Ctrl(0, -60, 0, 0);
 
                     avoid_state = AVOID_TRANSLATE_BACK;
                 }
                 break;
 
-            case AVOID_TRANSLATE_BACK:               //平移回线
+            case AVOID_TRANSLATE_BACK:
                 Motor_Get_Encoder(&encoder);
                 avg_enc = (abs(encoder.encoder_m1) + abs(encoder.encoder_m2)
                          + abs(encoder.encoder_m3) + abs(encoder.encoder_m4)) / 4;
 
-                // 使用出线时记录的编码器值，确保精确回到线上
-                if(avg_enc >= translate_encoder)        //判断是否回到线上
+                if(avg_enc >= g_translate_encoder_target)  // 平移回线到位
                 {
                     Motion_Ctrl(0, 0, 0, 0);
-                    Servo_SetAngle(90);
-                    vTaskDelay(pdMS_TO_TICKS(500));
-
-                    // 重置所有状态
-                    translate_encoder = 0;
+                    front_dist = 0;
                     left_dist = 0;
                     right_dist = 0;
                     avoid_state = AVOID_NORMAL;
-                    // 释放信号量，恢复巡线
                     xSemaphoreGive(xAvoidSemaphore);
                 }
                 break;
+
+            case AVOID_ABORT:
+                Motion_Ctrl(0, 0, 0, 0);  // 停车
+                Servo_SetAngle(90);        // 舵机回正
+                front_dist = 0;            // 重置测距数据
+                left_dist = 0;
+                right_dist = 0;
+                avoid_state = AVOID_NORMAL;
+                xSemaphoreGive(xAvoidSemaphore);  // 释放信号量，恢复巡线
+                break;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
 
+/**
+ * @brief  巡线任务，通过红外传感器检测黑线并控制小车沿线路行驶
+ * @param  param FreeRTOS任务参数（未使用）
+ * @retval 无
+ */
 //巡线任务
 void irtracking_Task(void* param)
 {
 
     while(1)
     {
+        // 转向时nav_state=NAV_IDLE，巡线自动停止，避免与转向冲突
         if((nav_state == NAV_GOING || nav_state == NAV_RETURNING) &&
            xSemaphoreTake(xAvoidSemaphore, 0) == pdPASS)
         {
-            LineWalking();
+            if(LineWalking() != 0) {
+                // 无有效黑线（不在地图上），停车
+                Motion_Ctrl(0, 0, 0, 0);
+            }
             xSemaphoreGive(xAvoidSemaphore);
         }
 
@@ -194,6 +220,11 @@ void irtracking_Task(void* param)
 }
 
 
+/**
+ * @brief  RFID导航联动任务，读取RFID卡信息实现路口转向和房间识别
+ * @param  param FreeRTOS任务参数（未使用）
+ * @retval 无
+ */
 //RFID导航联动
 void car_walking(void *param)
 {
@@ -211,28 +242,28 @@ void car_walking(void *param)
   motor_encoder_t enc;
   int32_t avg_enc;
   
-  Turn_Init(DIR_S, 3);
-  nav_state = NAV_IDLE;
+  Turn_Init(DIR_S, 0);
+  nav_state = NAV_IDLE;      // 停车等待语音/蓝牙指令
   
   while(1)
   {
     for (i = 0; i < 5; i++) uid[i] = 0;
     
-    status = MFRC522_Request(PICC_REQALL, uid);
+    status = MFRC522_Request(PICC_REQALL, uid);  // 寻卡
     if (status != MI_OK) {
-      for (i = 0; i < 4; i++) last_uid[i] = 0;
+      for (i = 0; i < 4; i++) last_uid[i] = 0;  // 无卡时重置上次卡号，允许重试
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
     
-    status = MFRC522_Anticoll(uid);
+    status = MFRC522_Anticoll(uid);  // 防冲突
     if (status != MI_OK) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
-    
+
     same_card = 1;
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 4; i++) {  // 检查是否与上次同一张卡，防止重复触发
       if (uid[i] != last_uid[i]) {
         same_card = 0;
         break;
@@ -245,26 +276,26 @@ void car_walking(void *param)
     
     for (i = 0; i < 4; i++) last_uid[i] = uid[i];
     
-    uid[4] = uid[0] ^ uid[1] ^ uid[2] ^ uid[3];
-    if (MFRC522_SelectTag(uid) == 0) {
+    uid[4] = uid[0] ^ uid[1] ^ uid[2] ^ uid[3];  // 计算校验字节
+    if (MFRC522_SelectTag(uid) == 0) {  // 选卡
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
     
-    status = MFRC522_Auth(PICC_AUTHENT1A, 1, key, uid);
+    status = MFRC522_Auth(PICC_AUTHENT1A, 1, key, uid);  // 密钥认证
     if (status != MI_OK) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
-    
-    status = MFRC522_Read(1, block_data);
+
+    status = MFRC522_Read(1, block_data);  // 读取Block 1数据
     if (status != MI_OK) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
 
     for (i = 0; i < 16; i++) {
-      turn_card_content[i] = block_data[i];
+      turn_card_content[i] = block_data[i];  // 保存卡片内容用于LCD显示
       if (block_data[i] == 0) break;
     }
     turn_card_content[i] = '\0';
@@ -275,56 +306,72 @@ void car_walking(void *param)
         nav_state = NAV_GOING;
       }
 
-      if (turn_target_room == 0) {
+      // 保存当前导航状态，转向后恢复
+      uint8_t prev_nav_state = nav_state;
+
+      if (nav_state == NAV_RETURNING) {
+        // 返航：根据当前方向计算返回起点的转向
         turn_action = Turn_CalculateReturn(turn_current_dir);
+      } else if (turn_target_room == 0) {
+        // 还没设置目标房间，直行通过路口
+        turn_action = TURN_STRAIGHT;
       } else {
+        // 前往目标房间：根据路口卡信息计算转向
         turn_action = Turn_CalculateTurn(turn_current_dir, turn_target_room, turn_info, turn_count);
       }
       turn_action_valid = 1;
 
-        if (turn_action != TURN_ERROR && turn_action != TURN_STRAIGHT) {
+        // 识别到RFID，立即停车
+        nav_state = NAV_IDLE;
+        vTaskDelay(pdMS_TO_TICKS(50));  // 等待巡线任务释放信号量
+        Motion_Ctrl(0, 0, 0, 0);
+        vTaskDelay(pdMS_TO_TICKS(1000));  // 停车等待1s
+
+        if (turn_action != TURN_ERROR && turn_action != TURN_STRAIGHT) {  // 需要转向
           if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(2000)) == pdPASS) {
-            Motion_Ctrl(0, 0, 0, 0);
-            Motor_Reset_Encoder();
+            uint16_t turn_delay = 0;
+            motor_speed_t turn_speed;
 
             switch(turn_action)
             {
               case TURN_LEFT:
-                Motion_Ctrl(0, 0, -60, 0);
-                do {
-                  Motor_Get_Encoder(&enc);
-                  avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
-                           + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-                  vTaskDelay(pdMS_TO_TICKS(10));
-                } while(avg_enc < g_turn_encoder_90);
+                turn_speed.speed_m1 = 60;
+                turn_speed.speed_m2 = -60;
+                turn_speed.speed_m3 = 60;
+                turn_speed.speed_m4 = -60;
+                turn_delay = g_turn_delay_90;
                 break;
               case TURN_RIGHT:
-                Motion_Ctrl(0, 0, 60, 0);
-                do {
-                  Motor_Get_Encoder(&enc);
-                  avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
-                           + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-                  vTaskDelay(pdMS_TO_TICKS(10));
-                } while(avg_enc < g_turn_encoder_90);
+                turn_speed.speed_m1 = -60;
+                turn_speed.speed_m2 = 60;
+                turn_speed.speed_m3 = -60;
+                turn_speed.speed_m4 = 60;
+                turn_delay = g_turn_delay_90;
                 break;
               case TURN_UTURN:
-                Motion_Ctrl(0, 0, -60, 0);
-                do {
-                  Motor_Get_Encoder(&enc);
-                  avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
-                           + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-                  vTaskDelay(pdMS_TO_TICKS(10));
-                } while(avg_enc < g_turn_encoder_180);
+                turn_speed.speed_m1 = 60;
+                turn_speed.speed_m2 = -60;
+                turn_speed.speed_m3 = 60;
+                turn_speed.speed_m4 = -60;
+                turn_delay = g_turn_delay_180;
                 break;
             }
 
+            Motor_Set_Speed(turn_speed);
+            vTaskDelay(pdMS_TO_TICKS(turn_delay));  // 等待转向完成
             Motion_Ctrl(0, 0, 0, 0);
-            turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
+            turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);  // 更新当前朝向
             xSemaphoreGive(xAvoidSemaphore);
           }
-        } else if(turn_action == TURN_STRAIGHT) {
-          turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
+        } else {
+          if(turn_action == TURN_STRAIGHT) {
+            turn_current_dir = Turn_UpdateDirection(turn_current_dir, turn_action);
+          }
         }
+
+        // 转向完成，等待1s再直行，恢复之前的导航状态
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        nav_state = prev_nav_state;  // 恢复导航状态，继续巡线
     } else {
       // 非路口卡，检查是否为房间卡(纯数字)
       is_room_card = 1;
@@ -339,31 +386,31 @@ void car_walking(void *param)
       }
       
       if (is_room_card) {
-        if (nav_state == NAV_GOING && room_num == turn_target_room) {
+        if (nav_state == NAV_GOING && room_num == turn_target_room) {  // 到达目标房间
           nav_state = NAV_IDLE;
           if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(1000)) == pdPASS) {
             Motion_Ctrl(0, 0, 0, 0);
             xSemaphoreGive(xAvoidSemaphore);
           }
-          vTaskDelay(pdMS_TO_TICKS(5000));
+          vTaskDelay(pdMS_TO_TICKS(5000));  // 在房间停留5秒
           
+          // 到达房间后掉头
           if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(1000)) == pdPASS) {
-            Motor_Reset_Encoder();
-            Motion_Ctrl(0, 0, -60, 0);
-            do {
-              Motor_Get_Encoder(&enc);
-              avg_enc = (abs(enc.encoder_m1) + abs(enc.encoder_m2)
-                       + abs(enc.encoder_m3) + abs(enc.encoder_m4)) / 4;
-              vTaskDelay(pdMS_TO_TICKS(10));
-            } while(avg_enc < g_turn_encoder_180);
+            motor_speed_t uturn_speed;
+            uturn_speed.speed_m1 = 60;
+            uturn_speed.speed_m2 = -60;
+            uturn_speed.speed_m3 = 60;
+            uturn_speed.speed_m4 = -60;
+            Motor_Set_Speed(uturn_speed);
+            vTaskDelay(pdMS_TO_TICKS(g_turn_delay_180));
             Motion_Ctrl(0, 0, 0, 0);
             xSemaphoreGive(xAvoidSemaphore);
           }
           
           turn_current_dir = Turn_UpdateDirection(turn_current_dir, TURN_UTURN);
-          turn_target_room = 0;
-          nav_state = NAV_RETURNING;
-        } else if (nav_state == NAV_RETURNING && room_num == 0) {
+          turn_target_room = 0;  // 清除目标房间
+          nav_state = NAV_RETURNING;  // 切换为返航模式
+        } else if (nav_state == NAV_RETURNING && room_num == 0) {  // 返航到达起点
           nav_state = NAV_IDLE;
           if(xSemaphoreTake(xAvoidSemaphore, pdMS_TO_TICKS(1000)) == pdPASS) {
             Motion_Ctrl(0, 0, 0, 0);
@@ -373,8 +420,8 @@ void car_walking(void *param)
       }
     }
     
-    MFRC522_ClearBitMask(MFRC522_REG_STATUS2, 0x08);
-    MFRC522_SetBitMask(MFRC522_REG_FIFO_LEVEL, 0x80);
+    MFRC522_ClearBitMask(MFRC522_REG_STATUS2, 0x08);  // 关闭加密单元
+    MFRC522_SetBitMask(MFRC522_REG_FIFO_LEVEL, 0x80);  // 清空FIFO，为读下一张卡做准备
     
     vTaskDelay(pdMS_TO_TICKS(200));
   }

@@ -2,9 +2,8 @@
 #include "Headfile.h"
 #include "Turn.h"
 
-int16_t g_turn_encoder_90 = 20;
-int16_t g_turn_encoder_180 = 40;
-int16_t g_turn_encoder_straight = 50;
+int16_t g_turn_delay_90 = 700;     // 90度转向延时(ms)
+int16_t g_turn_delay_180 = 1400;   // 180度转向延时(ms)
 
 /**
  * @brief  读取红外巡线模块8个传感器状态
@@ -56,14 +55,23 @@ void irtacking_Read(uint8_t *s1,uint8_t *s2,uint8_t *s3,uint8_t *s4,uint8_t *s5,
 //#define IRR_PID_KD       (0)//kp固定情况下 不能往上调
 
 
-#define IRTrack_Trun_KP (8)   // 比例系数，决定响应速度
+#define IRTrack_Trun_KP (3)   // 比例系数，决定响应速度
 #define IRTrack_Trun_KI (0)   // 积分系数，当前未使用
-#define IRTrack_Trun_KD (2)   // 微分系数，抑制震荡，提高稳定性
+#define IRTrack_Trun_KD (3)   // 微分系数，抑制震荡，提高稳定性
+
+int16_t g_ir_speed = 20;       // 巡线速度（范围-100~+100）
+int16_t g_ir_pid_kp = 3;       // 巡线PID比例系数
+int16_t g_ir_pid_ki = 0;       // 巡线PID积分系数
+int16_t g_ir_pid_kd = 3;       // 巡线PID微分系数
 
 int pid_output_IRR = 0;
 
-#define IRR_SPEED 			  80   // 巡线速度（范围-100~+100）
 #define IRTrack_Minddle    0    // 中间的目标值
+
+// 丢线缓冲相关变量
+static int8_t g_last_err = 0;           // 最后一次有效偏差
+static uint16_t g_lost_line_timeout = 0; // 丢线超时计数器
+#define LOST_LINE_MAX_TICKS  5         // 丢线后最大保持次数(约500ms @ 10ms周期)
 
 /**
  * @brief  位置式PID计算巡线偏差
@@ -89,101 +97,120 @@ float APP_ELE_PID_Calc(int8_t actual_value)
 	// Kp=450: 比例系数，决定响应速度
 	// Ki=0: 积分系数，当前未使用
 	// Kd=30: 微分系数，抑制震荡，提高稳定性
-	IRTrackTurn=error*IRTrack_Trun_KP
-							+IRTrack_Trun_KI*IRTrack_Integral
-							+(error - error_last)*IRTrack_Trun_KD;
+	IRTrackTurn=error*g_ir_pid_kp
+							+g_ir_pid_ki*IRTrack_Integral
+							+(error - error_last)*g_ir_pid_kd;
 	return IRTrackTurn;
 }
 
 /**
  * @brief  巡线控制函数，根据传感器状态计算PID输出
  * @param  无
- * @retval 无
+ * @retval 0-正常巡线中  1-脱离黑线已停车
  */
 //x1-x8 从左往右数
 uint8_t LineWalking(void)
 {
 	static int8_t err = 0;
 	static uint8_t x1,x2,x3,x4,x5,x6,x7,x8;
+	uint8_t black_count = 0;  // 黑线传感器计数
 	irtacking_Read(&x1,&x2,&x3,&x4,&x5,&x6,&x7,&x8);
 
-	// 优先判断特殊路况
-	// 情况1：x1、x3、x4、x5、x8都在黑线上，说明车身居中，偏差为0
-  if(x1 == 0 &&  x3 == 0 && x4 == 0 && x5 == 0 && x8 == 0 )
+	// 统计检测到黑线的传感器数量
+	if(x1 == 0) black_count++;
+	if(x2 == 0) black_count++;
+	if(x3 == 0) black_count++;
+	if(x4 == 0) black_count++;
+	if(x5 == 0) black_count++;
+	if(x6 == 0) black_count++;
+	if(x7 == 0) black_count++;
+	if(x8 == 0) black_count++;
+
+	// 黑线传感器数量异常：全白(0)或全黑(8)或过多(>=6)，说明不在有效黑线上
+	if(black_count == 0 || black_count >= 6)
+	{
+		// 丢线后保持最后一次偏差值继续转向，给转弯留出缓冲时间
+		if(black_count == 0)
+		{
+			// 全白丢线：保持最后偏差继续转向
+			if(g_lost_line_timeout < LOST_LINE_MAX_TICKS)
+			{
+				g_lost_line_timeout++;
+				err = g_last_err;  // 保持最后一次偏差
+			}
+			else
+			{
+				// 超时仍未找到线，停车
+				Motion_Ctrl(0, 0, 0, 0);
+				err = 0;
+				return 1;
+			}
+		}
+		else
+		{
+			// 黑线过多，直接停车
+			Motion_Ctrl(0, 0, 0, 0);
+			err = 0;
+			return 1;
+		}
+	}
+	else
+	{
+		// 正常巡线中，重置丢线计数器
+		g_lost_line_timeout = 0;
+	}
+
+	// 巡线偏差判断，传感器从左到右：x1 x2 x3 x4 x5 x6 x7 x8
+	// 0=黑线, 1=白底, 负值=偏左需左转, 正值=偏右需右转
+
+	// 居中：x4和x5任意一个或都在黑线
+	if(x4 == 0 || x5 == 0)
 	{
 		err = 0;
 	}
-	// 情况2：左直角转弯 - x1或x2在黑线且x8在白底，说明左侧有黑线
-	else if((x1 == 0 || x2 == 0 ) && x8 == 1)
-	{
-		err = -15;  // 负偏差表示需要向左转
-	}
-	// 情况3：右直角转弯 - x7或x8在黑线且x1在白底，说明右侧有黑线
-	else if((x7 == 0 ||  x8 == 0) && x1 == 1) 
-	{
-		err = 15;  // 正偏差表示需要向右转
-	}
-	
-	// 以下是直线巡线判断，根据传感器组合计算偏差值
-	// 偏差值范围：-3到+3，负值表示偏左，正值表示偏右
-
-	// x4在黑线（偏左一点）
-	else if(x1 == 1 && x2 == 1  && x3 == 1&& x4 == 0 && x5 == 1 && x6 == 1  && x7 == 1 && x8 == 1)
-	{
-		err = -1;
-	}
-	// x3和x4在黑线（偏左较多）
-	else if(x1 == 1 && x2 == 1  && x3 == 0&& x4 == 0 && x5 == 1 && x6 == 1  && x7 == 1 && x8 == 1)
+	// 偏左较多：x3在黑线
+	else if(x3 == 0 && x4 == 1)
 	{
 		err = -2;
 	}
-	// x3在黑线（偏左）
-	else if(x1 == 1 && x2 == 1  && x3 == 0&& x4 == 1 && x5 == 1 && x6 == 1  && x7 == 1 && x8 == 1)
+	// 偏右较多：x6在黑线
+	else if(x5 == 1 && x6 == 0)
 	{
-		err = -2;
+		err = 2;
 	}
-	
-	// x2和x3在黑线（偏左很多）
-	else if(x1 == 1 && x2 == 0  && x3 == 0&& x4 == 1 && x5 == 1 && x6 == 1  && x7 == 1 && x8 == 1)
+	// 偏左很多：x2在黑线
+	else if(x2 == 0 && x3 == 1)
 	{
 		err = -3;
 	}
-
-	// 右侧传感器判断（对称逻辑）
-	// x5在黑线（偏右一点）
-	else if(x1 == 1 && x2 == 1  && x3 == 1&& x4 == 1 && x5 == 0 && x6 == 1  && x7 == 1 && x8 == 1)
-	{
-		err = 1;
-	} 
-	// x5和x6在黑线（偏右较多）
-	else if(x1 == 1 && x2 == 1  && x3 == 1&& x4 == 1 && x5 == 0 && x6 == 0  && x7 == 1 && x8 == 1)
-	{
-		err = 2;
-	}
-	// x6在黑线（偏右）
-	else if(x1 == 1 && x2 == 1  && x3 == 1&& x4 == 1 && x5 == 1 && x6 == 0  && x7 == 1 && x8 == 1)
-	{
-		err = 2;
-	}
-	// x6和x7在黑线（偏右很多）
-	else if(x1 == 1 && x2 == 1  && x3 == 1&& x4 == 1 && x5 == 1 && x6 == 0  && x7 == 0 && x8 == 1)
+	// 偏右很多：x7在黑线
+	else if(x6 == 1 && x7 == 0)
 	{
 		err = 3;
 	}
-	
-	// x4和x5都在黑线，说明车身居中
-	else if(x1 == 1 &&x2 == 1 &&x3 == 1 && x4 == 0 && x5 == 0 && x6 == 1 && x7 == 1&& x8 == 1)
+	// 极左：x1在黑线，大幅左转
+	else if(x1 == 0 && x2 == 1)
 	{
-		err = 0;
+		err = -5;
 	}
-	
-	// 其他情况保持上一个状态，维持当前转向
-	
+	// 极右：x8在黑线，大幅右转
+	else if(x7 == 1 && x8 == 0)
+	{
+		err = 5;
+	}
+	// 其他情况保持上一个err值
+
+	// 记录最后一次有效偏差，用于丢线缓冲
+	if(black_count > 0 && black_count < 6)
+	{
+		g_last_err = err;
+	}
+
 	// 调用PID计算函数，将偏差值转换为电机控制量
 	pid_output_IRR = (int)(APP_ELE_PID_Calc(err));
 	
     // 电机控制：根据PID输出和巡线速度控制左右轮差速
-	Motion_Ctrl(IRR_SPEED, 0, pid_output_IRR, 0);
+	Motion_Ctrl(g_ir_speed, 0, pid_output_IRR, 0);
 
 	return 0;
 }

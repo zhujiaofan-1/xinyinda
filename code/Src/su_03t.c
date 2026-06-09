@@ -13,7 +13,7 @@ TaskHandle_t xUART2_Recv_Task_Handle; // UART2接收任务句柄
 
 static uint8_t UART2_Recv_dma_buf[UART2_RECV_LEN] = {0};
 
-static uint8_t UART2_Recv_buf[UART2_RECV_LEN] = {0};
+uint8_t g_su03t_recv_data[UART2_RECV_LEN] = {0};  // SU03T接收数据，供LCD显示
 static uint16_t UART2_recv_len = 0;
 
 /**
@@ -46,51 +46,57 @@ void Process_UART2_Recv_Data(uint8_t* data)
 {
     uint16_t new_room = 0;
 
+    // 导航去房间时不接收新指令，返航和空闲时可以接收
+    if (nav_state == NAV_GOING) {
+        return;
+    }
+
+    // ASCII数字格式：'0'~'5' 直接对应房间号
     if (data[0] >= '0' && data[0] <= '5') {
         new_room = data[0] - '0';
-        Turn_GoRoom(new_room);
-        if(new_room == 0) {
-            UART_Send_String("\r\nGo to room: RETURN HOME\r\n");
-        } else {
-            char msg[] = "\r\nGo to room: X\r\n";
-            msg[13] = data[0];
-            UART_Send_String(msg);
-        }
-        return;
     }
-
-    switch ((uint8_t)data[0])
+    else
     {
-    case 0x1A:
-        new_room = 1;
-        break;
-    
-    case 0x2B:
-        new_room = 2;
-        break;
+        // SU03T语音模块自定义编码格式
+        switch ((uint8_t)data[0])
+        {
+        case 0x1A:
+            new_room = 1;
+            break;
+        
+        case 0x2B:
+            new_room = 2;
+            break;
 
-    case 0x3C:
-        new_room = 3;
-        break;
-    
-    case 0x4D:
-        new_room = 4;
-        break;
-    
-    case 0x5E:
-        new_room = 5;
-        break;
+        case 0x3C:
+            new_room = 3;
+            break;
+        
+        case 0x4D:
+            new_room = 4;
+            break;
+        
+        case 0x5E:
+            new_room = 5;
+            break;
 
-    case 0x9F:
-        new_room = 0;
-        break;
-    
-    default:
-        return;
+        case 0x9F:
+            new_room = 0;
+            break;
+        
+        default:
+            return;
+        }
     }
 
-    if (nav_state == NAV_IDLE || nav_state == NAV_RETURNING) {
-        Turn_GoRoom(new_room);
+    if (new_room != 0) {
+        Turn_GoRoom(new_room);          // 导航到指定房间
+        char msg[] = "\r\nGo to room: X\r\n";
+        msg[13] = new_room + '0';
+        UART_Send_String(msg);
+    } else {
+        Turn_GoRoom(0);                 // 返航回起点
+        UART_Send_String("\r\nGo to room: RETURN HOME\r\n");
     }
 }
 
@@ -116,17 +122,18 @@ void su03t_Receive_Task(void *pvParameters)
 {
     while(1)
     {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);  // 阻塞等待空闲中断通知
+
+        // 计算实际接收数据长度
         UART2_recv_len = UART2_RECV_LEN - __HAL_DMA_GET_COUNTER(huart2.hdmarx);
-	
-		memcpy(UART2_Recv_buf, UART2_Recv_dma_buf, UART2_recv_len);
-		
-		Process_UART2_Recv_Data(UART2_Recv_buf);
-		
-		memset(UART2_Recv_dma_buf, 0, UART2_RECV_LEN);
-		memset(UART2_Recv_buf, 0, UART2_RECV_LEN);
-        
+
+		memcpy(g_su03t_recv_data, UART2_Recv_dma_buf, UART2_recv_len);  // 拷贝到全局缓冲区供LCD显示
+
+		Process_UART2_Recv_Data(g_su03t_recv_data);  // 解析并执行语音指令
+
+		memset(UART2_Recv_dma_buf, 0, UART2_RECV_LEN);  // 清空DMA缓冲区
+
+        // 重新启动DMA接收和空闲中断
         HAL_UART_Receive_DMA(&huart2, UART2_Recv_dma_buf, UART2_RECV_LEN);
         __HAL_UART_ENABLE_IT(&huart2, UART_IT_IDLE);
     }
